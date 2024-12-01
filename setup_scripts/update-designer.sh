@@ -83,7 +83,13 @@ if [[ "$TEST_REGISTRY" != TRUE ]]; then
     #wget --quiet https://nps.box.com/shared/static/xk9e07r7m5szrc9owggawyxzy5w3rzrh.tar -O labtainer-developer.tar
     #wget --quiet https://github.com/mfthomps/Labtainers/raw/master/distrib/release/labtainer-developer.tar -O labtainer-developer.tar
     wget --quiet https://github.com/mfthomps/Labtainers/tarball/master -O labtainer-master.tar
+    result=$?
+    if [[ result -ne 0 ]];then
+        echo "Failed retrieving master tarball from github.  Network problems?  Maybe try again."
+        exit
+    fi
     sync
+
 else
     cp /media/sf_SEED/test_vms/$HOSTNAME/labtainer-master.tar .
     echo "USING SHARED FILE TAR, NOT PULLING FROM WEB"
@@ -99,7 +105,7 @@ if [[ "$TEST_REGISTRY" != TRUE ]]; then
    sudo systemctl kill --kill-who=all apt-daily.service
    sudo systemctl kill --kill-who=all apt-daily-upgrade.service
    sudo rm /var/lib/dpkg/lock
-   sudo apt-get install -y default-jre xdotool
+   sudo apt-get install -y default-jre xdotool net-tools
 fi
 #sudo -H pip install netaddr parse python-dateutil
 cd ..

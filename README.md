@@ -9,7 +9,7 @@ Labtainers include more than 50 cyber lab exercises and tools to build your own.
 * Individualized lab exercises to discourage sharing solutions
 
 Labtainers provide controlled and consistent execution environments in which students perform labs entirely within the confines of their computer, regardless of the Linux distribution and packages installed on the student's computer.  Labtainers run on our [VM appliance][vm-appliancee], or on any Linux
-with Dockers installed, and on Docker Workstation running on Mac or Windows computers.  
+with Dockers installed.  And Labtainers is available as cloud-based VMs, e.g., on Azure as described in the [Student Guide][student-guide].
 
 See the [Student Guide][student-guide] for installation and use, and the [Instructor Guide][instructor-guide] for student assessment.  Developing and customizing
 lab exercises is described in the [Designer Guide][designer-guide].
@@ -22,9 +22,9 @@ The Labtainers website, and downloads (including VM appliances with Labtainers p
 [designer-guide]: docs/labdesigner/labdesigner.pdf
 [Papers]: https://nps.edu/web/c3o/labtainers#papers
 
-Distribution created: 03/12/2021 13:18 </br>
-Previous revision: v1.3.4m </br>
-Commit: 1e9e6433 </br>
+Distribution created: 11/22/2024 09:42 </br>
+Revision: v1.4.4e </br>
+Commit: a3a40d0e </br>
 Branch: master </br>
 
 ## Content
@@ -88,6 +88,234 @@ of new labs.  For those, run ./update-designer.sh from the labtainer/trunk/setup
 The installation script and the update-designer.sh script set environment variables,
 so you may want to logout/login, or start a new bash shell before using Labtainers the
 first time.
+
+November 22, 2024
+- Replaced google cloud VM, this time due to a failure of systemd within containers.
+
+September 23, 2024
+- Replaced google cloud VM, which was using the wrong Docker version
+
+September 10, 2024
+- Typo in creation of imodule path
+
+July 26, 2024
+- Modify capinout to not use grantpt clib function, which now seems to crash when run from a container.
+
+July 22, 2024
+- Add a base container for Ubuntu22 and changes to framework to support that.
+
+July 5, 2024
+- Migrate to Ubuntu 24 as the VM appliance 
+- The docker pyhton package uses a broken python http library, requires package downgrade.
+- Use virtual python environment to avoid Ubuntu lockdown of python packages.
+- Add boot parameter to allow sharing systemd between containers and the VM.
+- Redirect error messages from broken tar utility on updates.
+- Ubuntu update breakage for msc packages (see update-ubuntu.sh) for version 18 VMs
+- The docker-compose command is broken, use "docker compose"
+- Force socket permissions in headless labtainers.
+- Update headless Labtainers to use Ubuntu 24
+
+November 27, 2023
+- Add Google Cloud Platform option for ubuntu22 on ec2 machine.
+
+September 18, 2023
+- Previous fix implementation was flawed.
+
+August 8, 2023
+- Handle change to DockerHub image json format.  Thanks Kees!
+
+April 17, 2023
+- Force use latest lab version, e.g., iptables2 intead of iptables.  Fix tab completion to only display latest. (Issue #77)
+- CyberCIEGE lab installation was failing due to X11 race condition. (Issue #76)
+- Note in CyberCIEGE readme to direct students to save collected logs in $HOME directory. (Issue #75)
+- Radius lab checkwork was incorrectly reporting "radiusd not running", missing prestop script. (Issue #74)
+- Labedit corrupted the start configuration file when the MACVLAN\_EXT option was used. (Issue #73)
+
+February 1, 2023
+- Bash history for non-default users was not being saved.
+January 26, 2023
+- Modified powershell scripts for gcloud to use the selected zone to qualify VM names.
+January 4, 2023
+- Containers using systemd were failing on newer systemd present in Ubuntu 22
+- Add --zone parameter to google cloud scripts, with value derived from the set\_defaults script.
+December 21, 2022
+- Fix xforge results criteria to not expect pathname, and add check to see if POST issued to edit profile. And fix attacker
+  http server to run from the home directory.
+December 19, 2022
+- Add strace lab to introduce system call tracing.
+- X11 DISPLAY value was incorrect if multiple devices in the /tmp/.X11-unix directory.
+- Use of python/bash/sh/etc with no arguments was causing capinout to crash.
+December 9, 2022
+- Modify Azure vm creation script to use a prebuilt Labtainer VM image from the Azure Community Gallery.
+- Terminals on cloud VMs crash for unknown reasons during startup or right click on the terminal.  Attempt
+  to address by start/stop of a terminal.
+December 5, 2022
+- When collecting artifacts, include modified files from directories of non-default users, e.g., their bash histories.
+- Alter web assessment to display the new "other user" files.
+- Include files from .local/bin on each container in artifacts.  Intended to make these available to instructor via web assesment.
+- In the ACL lab, include th /shared\_data/bob/fun file in the results for reference by the instructor.
+- Catch use of "sh" or "bash" from command line and skip when parsing for given command, e.g., as done with "time" or "sudo".
+- In the tcpip lab, could not ssh into the server during subsequent lab sessions, the /run/sshd directory was not being remade.
+November 16, 2022
+- Fix path to Snort Manual in snort lab.
+- In ossec manual,fix path to manage\_agents
+October 12, 2022
+- Google cloud remove background operator from gnome-terminal command, still crashes on right click
+  but seems stable after running a newterm.sh.
+October 10, 2022
+- Fix Google cloud newterm.sh; expand that boot disk to 30G.
+September 20, 2022
+- Note user id and password for TCP/IP lab in the lab manual.
+August 30, 2022
+- Use the X11 socket name when setting DISPLAY from a container's .profile
+August 9, 2022
+- Fix name of processValueMax function in grader.  Issue #63
+
+August 4, 2022
+- The labedit program was rebuilt with the wrong JDK, preventing older JREs from running labedit
+
+July 18, 2022
+- Creation of Ubuntu20-based containers was failing within IModules. Issue #61.
+
+March 23, 2022
+- Fix path to tap lock directory; was causing failure of labs using network taps
+- Update plc-traffic netmon computer to have openjfx needed for new grassmarlin in java environment 
+- Speed up lab startup by avoiding chown -R, which is very slow in docker.
+- Another shot at avoiding deletion of the X11 link in container /tmp directory.
+- Fix webtrack counting of sites visited and remove live-headers goal, that tool is no longer available.
+  Clarified some lab manual steps.
+
+March 2, 2022
+- Add new ssh-tunnel lab (thanks GWD!)
+- Fix labedit failure to reflect X11 value set by new\_lab\_setup
+- Add option to not parameterize a container
+
+February 23, 2022
+- labedit was corrupting start.config after addition of new containers
+- Incorrect path to student guide in the student README file; dynamically change for cloud configs
+- Incorrect extension to update-labtainer.sh
+- Msc guide enahancements
+- Update the ghidra lab to include version 10.1.2 of Ghidra
+
+February 15, 2022
+- Revert Azure cloud support to provision for each student.  Azure discourages sharing resources.
+
+January 24, 2022
+- Azure cloud now uses image stored in an Azure blob instead of provisioning for each student.
+- Added support for Google Cloud.
+
+January 19, 2022
+- Introduce Labtainers on the Azure cloud.  See the Student Guide for details on how to use this.
+
+January 3, 2022
+- Revise setuid-env lab to add better assessment; simlab testing and avoid sighup in the printenv child.
+- Fix assessment goal count directive to exclude result tag values of false.
+- Do not require labname when using gradelab -a with a grader started with the debug option.
+- Revise capinout (stdin/stdout mirroring) to handle orphaning of command process children, improved documentation
+and error handling.
+- Added display of progress bars of docker images being pulled when a lab is first run.
+- User feedback on progress of container initialization.
+- The pcap-lib lab was missing a notify file needed for automated  assessment; Remove extraneous step from Lab Manual.
+
+November 23, 2021
+- Disable ubuntu popup errors on test VM.
+- Fix handling of different DISPLAY variable formats.
+
+October 22, 2021
+- Revise the tcpip lab guide to note a successful syn-flood attack is not possible.  Fix its automated assessment and add SimLab scripts. 
+- Change artifact file extension from zip to lab, and add a preamble to confuse GUI file managers.  Students were opening the zip and submitting its guts.
+- Make the -r option to gradelab the default, add a -c option for cumulative use of grader.
+- Modify refresh\_mirror to refer to the local release date to avoid frequent queries of DockerHub.  Each such query counts as an image pull, 
+and they are now trying to monetize those.
+
+September 30, 2021
+- Change bufoverflow lab guide and grading to not expect success with ASLR turned on, assess whether it was run.
+- Error handling for web grader for cases where student lacks results.
+- Print warning when deprecated lab is run.
+- Change formatstring grading to remove unused "\_leaked\_secret" description and clarify value of leaked\_no\_scanf.
+- Also change formatstring grading to allow any name for the vulnerable executable.
+
+September 29, 2021
+- Gradelab error handling, reduce instances of crashes due to bad zip files.
+- Limit stdout artifact files to 1MB
+
+September 17, 2021
+- Ghidra lab guide had wrong IP address, was not remade from source.
+
+September 14, 2021
+- Example labs for LDAP and Mariadb using SSL. Intended as templates for new labs.
+- Handle Mariadb log format
+- Add per-container parameters to limit CPU use or pin container to CPU set.
+- Labpack creation now available via a GUI (makepackui).
+- Tab completion for the labtainer, labpack and gradelab commands.
+- New parallel computing lab ``parallel'' using MPI.
+
+August 3, 2021
+- Add a "WAIT\_FOR" configuration option to cause a container to delay parameterization until
+another container completes its parameterization.
+- Support for Mariadb log formats in results parsing
+- Remove support for Mac and Windows use of Docker Desktop.  That product is too unstable for us to support.
+- Supress stderr messages when user uses built-in bash commands such as "which".
+- Bug fixes to makepack/labpack programs.
+
+July 19, 2021
+- Add a DNS lab to introduce the DNS protocol and configuration.
+- Revised VirtualBox appliance image to start with the correct update script.
+- Split resolv.conf nameserver parameter out of the lab\_gw configuration field into its own value.
+- IModule command failed if run before any labs had been started.
+
+July 5, 2021
+- Errors in DISPLAY env variable management broke GUI applications on Docker Desktop.
+
+July 1, 2021
+- Support Mac package installation of headless Labtainers.
+- The routing-basics lab automated assessment failed due to lack of treataslocal files
+- Correct typos and incorrect addresses in routing-basics lab, and fix automated assessment.
+- Assessment of pcapanalysis was failing.
+
+June 10, 2021
+- All lab manual PDFs are now in the github repo
+- Convert vpnlab and vpnlab2 instructions to PDF lab manuals.
+
+May 25, 2021
+- Add searchable keywords to each lab.  See "labtainer -h" for usage.
+- Expand routing-basics lab and lab manual
+- Remove routing-basics2 lab, it is now redundant.
+- sudo on some containers failed because hostnames remove underscores, leading to mismatch
+  with the hosts file.  Fix with extra entry in the hosts file with container name sans underscore.
+- New Labpack feature to package a collection of labs, and makepack tool to create Labpacks.
+- Error check for /sbin directory when using ubuntu20 -- would be silently fatal.
+- New network-basics lab
+
+May 5, 2021
+- Introduce a new users lab to introduce user/group management
+- Surpress Apparmor host messages in centos container syslogs
+
+April 28, 2021
+- New base2 images lacked man pages.  Used unminimize to restore them in the base image.
+- Introduce a OSSEC host-based IDS lab.
+
+April 13, 2021
+- CyberCIEGE lab failed because X11 socket was not relocated prior to starting Wine via fixlocal.
+
+April 9, 2021
+- New gdb-cpp tutorial lab for using GDB on a simple C++ program.
+- Floating point exceptions were revealing use of exec\_wrap.sh for stdin/stdout mirroring.
+
+April 7, 2021
+- ldap lab failed when moved to Ubuntu 20.  Problem traced to problem with nscd cache of pwd.  Move ldap to Ubuntu 20
+
+March 23, 2021
+- Parameterizing with RANDOM did not include the upper bound.
+- Add optional step parameter to RANDOM, e.g., to ensure word boundaries.
+- db-access lab: add mysql-workbench to database computer.
+- New overrun lab to illustrate memory references beyond bounds of c data structures.
+- New printf lab to introduce memory references made by the printf function.
+
+March 19, 2021
+- gradelab ignore makdirs error, problem with Windows rmtree on shared folders.
+- gradelab handle spaces in student zip file names.
+- gradelab handle zip file names from Moodle, including build downloads.
 
 March 12, 2021
 - labedit UI: Remove old wireshark image from list of base images.

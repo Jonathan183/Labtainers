@@ -480,21 +480,30 @@ def handle_expression(resulttag, json_output, logger):
     if resulttag.startswith('(') and resulttag.endswith(')'):
         express = resulttag[resulttag.find("(")+1:resulttag.find(")")]
         for tag in json_output:
-            logger.debug('is tag %s in express %s' % (tag, express))
+            logger.debug('is tag %s in express %s ?' % (tag, express))
+            express_replaced = None
             if tag in express:
                 if json_output[tag] != None:
-                    express = express.replace(tag, json_output[tag])
+                    express_replaced = express.replace(tag, json_output[tag])
+                    #print('replaced become %s' % express_replaced)
+                    break
                 else:
+                    #print('json[%s] is none' % tag)
                     return None
-        try:
-            logger.debug('try eval of <%s>' % express)
-            result = evalExpress.eval_expr(express)
-        except:
-            logger.error('could not evaluation %s, which became %s' % (resulttag, express))
-            sys.exit(1)
+        if express_replaced is None:
+            logger.debug('expression did not change, must be no results')
+        else:
+            try:
+                logger.debug('try eval of <%s>' % express_replaced)
+                result = evalExpress.eval_expr(express_replaced)
+                #print('result is %d' % result)
+            except:
+                logger.error('could not evaluate %s, which became %s' % (resulttag, express_replaced))
+                sys.exit(1)
     else:
         logger.error('handleExpress called with %s, expected expression in parens' % resulttag)
     return result
+
 
         
 def processMatchAny(result_sets, eachgoal, goal_times, logger):
@@ -537,7 +546,7 @@ def processMatchAny(result_sets, eachgoal, goal_times, logger):
             try:
                 resulttagresult = results[resulttag]
             except KeyError:
-                logger.debug('%s not found in file %s' % (resulttag, ts))
+                #logger.debug('%s not found in file %s' % (resulttag, ts))
                 continue
         if resulttagresult == None:
             continue 
@@ -589,6 +598,61 @@ def processValue(result_sets, eachgoal, grades, logger):
             value = resulttagresult
     #print 'count is %d' % count
     grades[goalid] = value
+
+def processValueSum(result_sets, eachgoal, grades, logger):
+    ''' assign the sum of all result values '''
+    retval = 0
+    goalid = eachgoal['goalid']
+    #print goalid
+    jsonanswertag = eachgoal['answertag']
+    #print jsonanswertag
+    resulttag = eachgoal['resulttag']
+    if resulttag.startswith('result.'):
+       resulttag = resulttag[len('result.'):]
+
+    value = None
+    for ts in result_sets.getStamps():
+        results = result_sets.getSet(ts)
+
+        if results == {}:
+            # empty - skip
+            continue
+
+        try:
+            resulttagresult = results[resulttag]
+        except KeyError:
+            continue
+        if resulttagresult != None:
+            retval = retval+resulttagresult
+    grades[goalid] = retval
+
+def processValueMax(result_sets, eachgoal, grades, logger):
+    ''' assign the max of all result values '''
+    retval = 0
+    goalid = eachgoal['goalid']
+    #print goalid
+    jsonanswertag = eachgoal['answertag']
+    #print jsonanswertag
+    resulttag = eachgoal['resulttag']
+    if resulttag.startswith('result.'):
+       resulttag = resulttag[len('result.'):]
+
+    value = None
+    for ts in result_sets.getStamps():
+        results = result_sets.getSet(ts)
+
+        if results == {}:
+            # empty - skip
+            continue
+
+        try:
+            resulttagresult = results[resulttag]
+        except KeyError:
+            continue
+        if resulttagresult != None:
+            if resulttagresult > retval:
+                retval = resulttagresult
+    grades[goalid] = retval
  
 def processCount(result_sets, eachgoal, grades, logger):
     #print "Inside processCount"
@@ -646,7 +710,8 @@ def processCount(result_sets, eachgoal, grades, logger):
                 if found:
                     count += 1
             else:
-                count += 1
+                if resulttagresult:
+                    count += 1
     #print 'count is %d' % count
     grades[goalid] = count
 
@@ -837,11 +902,11 @@ def processBoolean(eachgoal, goal_times, studentlabdir, logger):
     bool_json = {}
     for timestamppart, current_goals in goals_ts_id.items():
         if timestamppart != default_timestamp or len(goals_ts_id)==1:
-            logger.debug('eval %s against %s tspart %s' % (t_string, str(current_goals), timestamppart))
+            #logger.debug('eval %s against %s tspart %s' % (t_string, str(current_goals), timestamppart))
             bool_json[timestamppart] = current_goals
             evalBooleanResult = evalBoolean.evaluate_boolean_expression(t_string, current_goals, logger, glist)
             if evalBooleanResult is not None:
-                logger.debug('bool evaluated to %r' % evalBooleanResult)
+                #logger.debug('bool evaluated to %r' % evalBooleanResult)
                 goal_times.addGoal(goalid, timestamppart, evalBooleanResult)
     bool_fname = 'bool_%s.json' % goalid
     bool_path = os.path.join(studentlabdir, '.local', 'result', bool_fname)
@@ -982,6 +1047,10 @@ def processLabExercise(studentlabdir, labidname, grades, goals, bool_results, go
             processCount(result_sets, eachgoal, grades, logger)
         elif eachgoal['goaltype'] == "value":
             processValue(result_sets, eachgoal, grades, logger)
+        elif eachgoal['goaltype'] == "value_sum":
+            processValueSum(result_sets, eachgoal, grades, logger)
+        elif eachgoal['goaltype'] == "value_max":
+            processValueMax(result_sets, eachgoal, grades, logger)
         elif eachgoal['goaltype'].startswith('is_'):
             processTrueFalse(result_sets, eachgoal, goal_times)
         else:
@@ -1045,14 +1114,15 @@ def ProcessStudentLab(studentlabdir, labidname, logger):
     except:
         pass
     goalsjsonfname = os.path.join(resultsdir,'goals.json')
-    with open(goalsjsonfname) as fh:
-        goals = json.load(fh)
+    if os.path.isfile(goalsjsonfname):
+        with open(goalsjsonfname) as fh:
+            goals = json.load(fh)
 
-    boolresultsfname = os.path.join(resultsdir,'bool_results.json')
-    with open(boolresultsfname) as fh:
-        bool_results = json.load(fh)
+        boolresultsfname = os.path.join(resultsdir,'bool_results.json')
+        with open(boolresultsfname) as fh:
+            bool_results = json.load(fh)
 
-    processLabExercise(studentlabdir, labidname, grades, goals, bool_results, goal_times, logger)
+        processLabExercise(studentlabdir, labidname, grades, goals, bool_results, goal_times, logger)
     
     return grades
 

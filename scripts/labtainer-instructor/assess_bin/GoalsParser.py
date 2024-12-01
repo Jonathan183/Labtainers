@@ -111,7 +111,7 @@ def ValidateTag(parameter_list, studentdir, goal_type, inputtag, allowed_special
     elif inputtag.startswith('(') and inputtag.endswith(')'):
         returntag = 'result.%s' % inputtag
     elif '.' in inputtag:
-        logger.debug("tag %s contains '.'" % inputtag)
+        #logger.debug("tag %s contains '.'" % inputtag)
         (target, finaltag) = inputtag.split('.')
         if not target in answer_tokens:
             logger.error("goals.config tag=<string> then tag must be:(%s), got %s" % (','.join(answer_tokens), inputtag))
@@ -122,7 +122,7 @@ def ValidateTag(parameter_list, studentdir, goal_type, inputtag, allowed_special
 
         returntag = getTagValue(parameter_list, target, finaltag, logger)
     else:
-        logger.debug("tag is %s" % inputtag)
+        #logger.debug("tag is %s" % inputtag)
         if not MyUtil.CheckAlphaDashUnder(inputtag):
             logger.error("Invalid characters in goals.config's tag (%s)" % inputtag)
             sys.exit(1)
@@ -133,11 +133,12 @@ def ValidateTag(parameter_list, studentdir, goal_type, inputtag, allowed_special
 def GetLabInstanceSeed(studentdir, logger):
     seed_dir = os.path.join(studentdir, ".local",".seed")
     student_lab_instance_seed = None
-    with open(seed_dir) as fh:
-        student_lab_instance_seed = fh.read().strip()
-    if student_lab_instance_seed is None:
-        logger.error('could not get lab instance seed from %s' % seed_dir)
-        sys.exit(1)
+    if os.path.isfile(seed_dir):
+        with open(seed_dir) as fh:
+            student_lab_instance_seed = fh.read().strip()
+        if student_lab_instance_seed is None:
+            logger.error('could not get lab instance seed from %s' % seed_dir)
+            #sys.exit(1)
     return student_lab_instance_seed
 
 def ParseGoals(homedir, studentdir, logger_in):
@@ -149,6 +150,10 @@ def ParseGoals(homedir, studentdir, logger_in):
     configfilelines = configfile.readlines()
     configfile.close()
     lab_instance_seed = GetLabInstanceSeed(studentdir, logger)
+    if lab_instance_seed is None:
+        logger.debug('No lab instance seed, not grading %s' % studentdir)
+        print('No lab instance seed, not grading %s' % studentdir)
+        return
     container_user = ""
     param_filename = os.path.join(MYHOME, '.local', 'config',
           'parameter.config')
@@ -161,7 +166,7 @@ def ParseGoals(homedir, studentdir, logger_in):
         linestrip = line.rstrip()
         if linestrip:
             if not linestrip.startswith('#'):
-                logger.debug("Current linestrip is (%s)" % linestrip)
+                #logger.debug("Current linestrip is (%s)" % linestrip)
                 try:
                     (each_key, each_value) = linestrip.split('=', 1)
                 except:
@@ -181,7 +186,7 @@ def ParseGoals(homedir, studentdir, logger_in):
                 # <type> : <string>
                 values = each_value.split(" : ")
                 numvalues = len(values)
-                logger.debug('numvalues is %d  values are: %s' % (numvalues, str(values)))
+                #logger.debug('numvalues is %d  values are: %s' % (numvalues, str(values)))
                 if not (numvalues == 4 or numvalues == 3 or numvalues == 2):
                     logger.error("goals.config contains unexpected value (%s) format" % each_value)
                     sys.exit(1)
@@ -199,6 +204,8 @@ def ParseGoals(homedir, studentdir, logger_in):
                         goal_type == "matchacross" or
                         goal_type == "count" or
                         goal_type == "value" or
+                        goal_type == "valueSum" or
+                        goal_type == "valueMax" or
                         goal_type == "execute"):
                         logger.error("Error found in line (%s)" % linestrip)
                         logger.error("goals.config contains unrecognized type (1) (%s)" % goal_type)
@@ -253,7 +260,7 @@ def ParseGoals(homedir, studentdir, logger_in):
                         resulttag = values[1].strip()
                         #print('parsegoals type is %s result %s' % (goal_type, resulttag))
                         nametags.append(MyGoal(each_key, goal_type, resulttag=resulttag))
-                    elif goal_type == 'count' or goal_type == 'value':
+                    elif goal_type == 'count' or goal_type.startswith('value'):
                         resulttag = values[1].strip()
                         nametags.append(MyGoal(each_key, goal_type, resulttag=resulttag))
                     elif goal_type == 'count_greater':

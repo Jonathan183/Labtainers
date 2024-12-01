@@ -55,7 +55,7 @@ END
 # add terminal to desktop
 # bidirectional shared clipboard
 # sudo apt-get install net-tools
-# wget https://my.nps.edu/documents/107523844/109121513/labtainer.tar
+# wget --quiet https://github.com/mfthomps/Labtainers/releases/latest/download/labtainer.tar -O labtainer.tar
 # tar xf labtainer.tar
 # rm labtainer.tar
 # cd labtainer
@@ -63,17 +63,32 @@ END
 # reboot
 # setup-scripts/vm-profile-add.sh
 #
-echo "$HOME/.doterms.sh &" >> ~/.profile
-cat >~/.doterms.sh <<EOL
-sleep 1
-gnome-terminal --geometry 120x31+150+300 --working-directory=$HOME/labtainer/labtainer-student -e "bash -c \"/bin/cat README; exec bash\"" &
-if [[ -f $HOME/labtainer/.doupdate ]]; then
-    gnome-terminal --geometry 73x31+100+300 --working-directory=$HOME/labtainer -x ./update-labtainer.sh
-fi
-EOL
-chmod a+x $HOME/.doterms.sh
+# remove snapd and its /var/cache
+#
+echo "rm -f \$HOME/labtainer/.did_message" >> ~/.profile
+echo "export PATH=\${PATH}:./bin" >> ~/.profile
+
+mkdir -p $HOME/.config/autostart
+cp $HOME/labtainer/trunk/setup_scripts/gnome-terminal.desktop $HOME/.config/autostart/
 touch $HOME/labtainer/.doupdate 
-gsettings set org.gnome.settings-daemon.plugins.power button-power 'shutdown'
+
+target=$HOME/.bashrc
+cat <<EOT >>$target
+   if [ -f $HOME/labtainer/.doupdate ]; then
+       rm -f \$HOME/labtainer/.doupdate
+       \$HOME/labtainer/update-labtainer.sh
+   fi
+   if [ ! -f \$HOME/labtainer/.did_message ]; then
+       clear
+       cat README
+       touch \$HOME/labtainer/.did_message
+   fi
+EOT
+
+
+#gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'shutdown'
+# shutdown no longer supported.  ubuntu has become a nanny.
+gsettings set org.gnome.settings-daemon.plugins.power power-button-action 'suspend'
 gsettings set org.gnome.nm-applet disable-disconnected-notifications "true"
 gsettings set org.gnome.nm-applet disable-connected-notifications "true"
 gsettings set org.gnome.desktop.session idle-delay 0
@@ -83,5 +98,7 @@ mkdir -p $HOME/labtainer_xfer
 cd $HOME/Desktop
 ln -s $HOME/labtainer/trunk/docs/student/labtainer-student.pdf
 ln -s ~/labtainer_xfer
-
+# xdotool does not work with wayland
+sudo sed -i s/^.WaylandEnable=false/WaylandEnable=false/ /etc/gdm3/custom.conf
+dconf load /org/gnome/terminal/legacy/profiles:/ < $HOME/labtainer/trunk/config/gnome-terminal-profiles.dconf
 

@@ -33,6 +33,10 @@ import sys, os.path
 import logging as logger
 import argparse
 import time
+from dateutil import parser
+from dateutil.parser import parse
+from datetime import datetime
+
 
 parser = argparse.ArgumentParser(
     description='Use git archive and file times from the current repo to'
@@ -88,8 +92,20 @@ def fixtimes(filelist, dist_path, pathspec, workdir):
         source = os.path.join(workdir, f)
         dest = os.path.join(dist_path, f)
         if os.path.isfile(dest):
-            mtime = int(os.path.getmtime(source))
-            os.utime(dest, (mtime, mtime))
+            #cmd = 'git log -1 --format="%%ad" %s' % source
+            cmd = 'git log -1 --format="%%at" %s' % source
+            child = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            output = child.communicate()
+            if len(output[0].decode('utf-8').strip()) > 0:
+                ts_string = output[0].decode('utf-8').strip()
+                parts = ts_string.split('.')
+                df_ts = int(parts[0])
+            else:
+                print('No git log output from %s' % cmd)
+                exit(1)
+
+            #mtime = int(os.path.getmtime(source))
+            os.utime(dest, (df_ts, df_ts))
 
 if args.pathspec.strip() == './':
     cmd = 'git archive %s | tar -x -C %s' % (args.branch, args.dist_path)

@@ -1,4 +1,8 @@
 # Headless Labtainers
+**NOTE** This capability is experimental on Docker Desktop for Macs and Windows.  At the moment, Docker Desktop is too unstable
+for us to support Labtainers on it.  The information below is for those who wish to experiment, and for use of cloud based 
+deployments.  
+
 Run Labtainers on systems that lack X11 desktops.  This assumes you have installed Docker, e.g., Docker Desktop on a Mac or
 Windows machine. Cloud-based solutions are also supported using remote servers.  Headless Labtainers are an alternative to 
 the Labtainer VM Appliance.
@@ -16,6 +20,8 @@ Open a browser and goto http://localhost:6901/vnc.html?password= (uses blank def
 
 In addition to starting the Headless Labtainers, the script will create a ~/headless-labtainers directory.  A student would then run
 headless-labtainers.sh from that directory in the future.  That directory will also contain persistent data.
+
+The user name and password on the resulting Labtainers container are both "labatiner.
 
 **Warning**: if you run docker-compose directly prior to running headless-labtainers.sh, you may end up with broken file 
 permissions (though running it directly after first running headless-labtainers.sh should work fine).

@@ -9,6 +9,7 @@
 \usepackage{courier}
 \usepackage{graphicx}
 \usepackage{mdframed}
+\usepackage{pdfpages}
 \begin{document}
 \begin{titlepage}
 \centering
@@ -166,7 +167,7 @@ containers, e.g., to hook bash and parameterize containers.
 \item Container scripts -- perform grading functions.
 \item Web interface -- The {\tt -w} option to gradelab starts a Flask web server on the container, found in the
 {\tt flask/server.py}.  When debugging and enhancing this, use the {\tt -v} option instead of the {\tt -w} option to
-cause the development flask directory to be mounted by the container.
+cause the development flask directory to be mounted by the container.  Then start the server with {\tt .local/flask/server.py labname}.
 	\end{itemize}
 
 	\item {\bf Lab designer} \begin{itemize}
@@ -366,7 +367,7 @@ New releases are created as follows:
 \begin{itemize}
 \item The premaster branch is tested using {\tt full\_build.sh} to ensure container images reflect the latest code, and Jenkins builds which
 ensure the premaster in github runs all regression tests.
-\item Merge premaster into master.  Do this manually (ignore automated scripts in distrib directory), and fix any merge conflicts.
+\item Merge premaster into master.  Do this manually (ignore automated scripts in distrib directory), and fix any merge conflicts. {git merge --no-ff premaster}
 \item Use {\tt refresh\_mirror.py} to push premaster registry images to Docker Hub.
 \item Determine the next git tag to use for the version ID, and pass that to {\tt justrelease.sh} (be sure to first activate an
 ssh agent and get the github personal access token.
@@ -504,7 +505,7 @@ student and designer distributions and uses those to run the smoketest VMs.
 The stock Jenkins is installed on the development VM.
 After installing Jenkins, add the jenkins user to the vboxfs and the docker groups
 \begin{verbatim}
-  sudo usermod -a -G vboxfs jenkins
+  sudo usermod -a -G vboxsf jenkins
   sudo usermod -a -G docker jenkins
 \end{verbatim}
 
@@ -552,6 +553,37 @@ Smoketest logs appear in a shared folder at ~/SEED/smokelogs.
 The host directory at {\tt SEED/test\_vms/<vmname>} is used to communicate with test VMs.
 The {\tt CURRENT\_BRANCH} environment variable is set to determine which test repo
 will be used as found in the config/registry.config file.
+
+\section{Capturing stdin/stdout}
+The user's {\tt .bashrc} sources two scripts to set up and manage functions that run prior to the 
+execution of the target command.  If the target command is to be monitored (e.g., is not a system command),
+then stdin and stdout are mirrored to timestamped files in the .local/result directory.  This mirroring
+is performed by the {\tt capinout} program whose source is in the {\tt tool-src/capinout} directory.
+The {\tt capinout} program is designed to handle use of pipes and redirection within the command.  The
+{\tt capinout} process (or one if its children) will fork/exec the {\tt wrap\_exec.sh} shell, which sets
+signal handling and uses {\tt eval} to run the target command. Commands
+that simply use stdin and stdout without pipes are managed using a pty that allows the command to control the
+terminal, e.g., to mask passwords or provide curses controls.  This requires a number of processes, as follows:
+\begin{itemize}
+\item The first process, called the \textit{stage}, simply waits for its child to exit, or for its child to report
+that the command process has orphaned a child, in which case the stage will exit, freeing up the terminal while the
+orphan continues to run and potentially send output to stdout and the timestamped mirrored file.  
+\item The stage
+process forks a child called \textit{capinout} that creates the master pty and performs the mirroring.  
+\item The capinout process creates a \textit{reaper} process that becomes the session leader and controller of the pty terminal.  
+\item The reaper then forks the command process which execs the wrap-exec.sh script.  Any orphans of the command process are reparented to the
+reaper, and if the reaper detects the command process exiting and leaving orphans, it signals the capinout process which
+in turn signals the stage so that the stage can exit.
+\end{itemize}
+\includepdf[pages=-,pagecommand={},width=\textwidth]{../../tool-src/capinout/capinout.pdf}
+
+\section {Headless Labtainers}
+See README files in the headless-lite; azure; and google directories for information about flavors of headless Labtainers (that run
+on cloud servers or other platforms lacking standard X11 desktops.
+\subsection{Gnome terminal issues}
+If gnome termainals are created prior to completion of container initialization, the gnome terminal may start and then exit.  This
+might occur when the initial Labtainers terminal is created on the labtainers container in a headless environment.  It may also occur
+when starting a lab (but why then would it also kill the original Labtainers terminal?).
 
 \section {Notes}
 \subsection {Race condition on precheck.sh output}
@@ -620,8 +652,33 @@ in start.config, seems to fix it?  NO: that breaks it by keeping services from r
 in attacker seems to keep the crash from happening?  Also happened in a hackazon container derived from a dockerfile that
 included multiple CMD entries (one in the latest file, one in the parent file).
 
+Sometimes (only see on testing), the container ID reverts from the labtainer name to its hash.  This can be accompanied by an
+inability to manually stop the container. Seems to be a Docker bug, but only appears every 6 months or so of daily regression testing.
+
+\subsubsection{Lab fixes}
+These fixes were deferred to avoid unnecessary rebuilds.  The problems are due to 
+files missed from git, or directories that are not created.
+
+ssl -- to fixlocal on ca:
+    mkdir ~/ca/private
+    mkdir ~/ca/certs
+    mkdir ~/ca/intermediate/private
+    mkdir ~/ca/intermediate/certs
+
 \subsubsection{Grader updates}
 Automate detection of need to update a local grader image, e.g., in response to a fix to the grader.
+
+\subsubsection{UI fixes}
+\begin{itemize}
+\item Resize windows and potentially alter font size.
+\item default buttons, e.g., so enter key makes default selection.
+\item right click menu for copy/paste in text fields.
+\item visual clue that lab needs saving.
+\item keyboard shortcuts
+\item UI for makepack
+\item Visual clue that results/goals window is open, color button?
+\item expand UI text area todo to flag goals/results without documentation
+\end{itemize}
 
 \subsection{ongoing}
 Updated framework and grader to use python3.  Intent is to not affect existing labs.  Need to publish centos-log2 and
@@ -720,5 +777,18 @@ tapped networks?  Advantage is designer need not configure individual components
 Labs having defined registries do not have test registry images.  The ParseStartConfig.py does not insert a test registry
 for these labs, thus any running of IModules on test or development systems will cause the Docker Hub instance of container
 images to run.
+
+\subsection{Gradelab via browser}
+The Flask web server is integrated with the grader container.  The {\tt labtainer-instructor/flask/server.py} program implements
+the server along with the flask/templates files.  For debugging, use the {\tt -vd} option instead of {\tt -w} to cause the local repo
+flask directory to be mounted and used within the container.  When you get a terminal to the grader container, run the instructor.py command
+and then start the server with {\tt .local/flask/server.py labname}.  The templates files contain dynamic HTML for the various links displayed
+on each page, and these have corresponding {\tt app.route} decorators in the server.py code.  Review the Flask product documentation to understand the dynamic HTML syntax and how values are replaced.
+
+\subsection{Lab versions}
+Some labs have multiple versions, reflecting substantive changes, e.g., changes to assessment artifacts, or introduction of new containers.
+This introduces naming issues, such as {\tt somelab} and {\tt somelab2}.  Lab listings will only show the latest version of a given lab, unless
+an earlier version is already installed.  While it may be tempting to hide version numbers from students and instructors, doing so can introduce
+its own problems.  For example, which xfer directory should the labs show up in, and what if they have different grading? 
 
 \end{document}

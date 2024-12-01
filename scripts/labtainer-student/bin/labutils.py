@@ -54,6 +54,7 @@ import traceback
 import string
 import errno
 import registry
+import dockerPull
 
 ''' assumes relative file positions '''
 here = os.path.dirname(os.path.abspath(__file__))
@@ -104,7 +105,8 @@ def isValidLab(lab_path):
     # Lab path must exist and must be a directory
     if os.path.exists(lab_path) and os.path.isdir(lab_path):
         # Assume it is valid lab then
-        logger.debug("lab_path directory (%s) exists" % lab_path)
+        #logger.debug("lab_path directory (%s) exists" % lab_path)
+        pass
     else:
         logger.error("Invalid lab! lab_path directory (%s) does not exist!" % lab_path)
         #traceback.print_exc()
@@ -115,8 +117,8 @@ def isValidLab(lab_path):
 def getFirstUnassignedIface(n=1):
     ''' get the nth network iterface that lacks an assigned IP address '''
     iflist = os.listdir('/sys/class/net')
+    count = 1
     for iface in sorted(iflist):
-        count = 1
         ip = get_ip_address(iface)
         if ip is None and n == count:
             return iface
@@ -187,11 +189,7 @@ def ParameterizeMyContainer(mycontainer_name, mycontainer_image_name, container_
     ''' copy lab_bin and lab_sys files into .local/bin and / respectively '''
     CopyLabBin(running_container, mycontainer_image_name, container_user, lab_path, name, image_info)
 
-    cmd = 'docker exec %s script -q -c "chown -R %s:%s /home/%s"' % (mycontainer_name, container_user, container_user, container_user)
-    if not DockerCmd(cmd):
-        logger.error('failed %s' % cmd)
-        exit(1)
-    cmd = 'docker exec %s script -q -c "chown root:root /usr"' % (mycontainer_name)
+    cmd = 'docker exec %s script -q -c "/home/%s/.local/bin/dochown.sh"' % (mycontainer_name, container_user)
     if not DockerCmd(cmd):
         logger.error('failed %s' % cmd)
         exit(1)
@@ -259,7 +257,7 @@ def StartMyContainer(mycontainer_name):
         logger.error("Container %s is already running!\n" % (mycontainer_name))
         sys.exit(1)
     command = "docker start %s" % mycontainer_name
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     if not DoCmd(command):
         retval = False
     return retval
@@ -275,7 +273,7 @@ def AllContainersCreated(container):
 def IsContainerCreated(mycontainer_name):
     retval = True
     command = "docker inspect -f {{.Created}} --type container %s" % mycontainer_name
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     result = subprocess.call(shlex.split(command), stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     if result == FAILURE:
        retval = False
@@ -329,7 +327,7 @@ def ConnectNetworkToContainer(start_config, mycontainer_name, mysubnet_name, mys
     logger.debug("Connecting more network subnet to container %s" % mycontainer_name)
     ip_param, dumb = GetNetParam(start_config, mysubnet_name, mysubnet_ip, mycontainer_name)
     command = "docker network connect %s %s %s" % (ip_param, mysubnet_name, mycontainer_name)
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     result = subprocess.call(shlex.split(command), stderr=subprocess.PIPE, stdout=subprocess.PIPE)
     logger.debug("Result of subprocess.call ConnectNetworkToContainer is %s" % result)
     return result
@@ -337,7 +335,7 @@ def ConnectNetworkToContainer(start_config, mycontainer_name, mysubnet_name, mys
 def DisconnectNetworkFromContainer(mycontainer_name, mysubnet_name):
     logger.debug("Disconnecting more network subnet to container %s" % mycontainer_name)
     command = "docker network disconnect %s %s" % (mysubnet_name, mycontainer_name)
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     result = 0
@@ -429,41 +427,58 @@ def GetX11SSH():
     #retval = '--env="DISPLAY" -v %s:%s -e XAUTHORITY="%s"' % (xauth, xauth, xauth)
     return retval 
 
-def isUbuntuSystemd(image_name):
+def isAlias(registry, labtainer_config):
+    ''' is the given registry one of the NPS registries? '''
+    if registry in [labtainer_config.default_registry, labtainer_config.test_registry, labtainer_config.legacy_registry]:
+        return True
+    else:
+        return False
+
+def isUbuntuSystemd(image_name, labtainer_config):
     ''' NOTE side effect of update networkImages global '''
     done = False
     retval = None
-    #print('check if %s is systemd' % image_name)
+    logger.debug('check if %s is systemd' % image_name)
     cmd = "docker inspect -f '{{json .Config.Labels.base}}' --type image %s" % image_name
     ps = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[0].strip()) > 0:
-            #logger.debug('isUbuntuSystemd base %s' % output[0].decode('utf-8'))
+            logger.debug('isUbuntuSystemd base %s' % output[0].decode('utf-8'))
             if output[0].decode('utf-8').strip() == 'null': 
+                ''' typically as part of a rebuld '''
                 base = image_name
             else:
                 base = output[0].decode('utf-8').rsplit('.', 1)[0]
                 if base.startswith('"'):
                     base = base[1:]
                 if '/' in base and '/' in image_name:
+                    ''' Hack to catch aliases of NPS registry, e.g., to keep testtregistry 
+                        images from pulling meta data from docker hub '''
                     my_registry = image_name.split('/')[0]
-                    no_reg = base.split('/')[1]
-                    base = '%s/%s' % (my_registry, no_reg)
+                    if isAlias(my_registry, labtainer_config):
+                        logger.debug('is alias')
+                        no_reg = base.split('/')[1]
+                        base = '%s/%s' % (my_registry, no_reg)
                 
             cmd = "docker history --no-trunc %s" % base
             ps = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             output = ps.communicate()
             for line in output[0].decode('utf-8').splitlines():
+                #logger.debug('history line is '+line) 
                 if 'sshd' in line or 'xinetd' in line:
                     net_image = image_name
                     if '/' in image_name:
                         net_image = image_name.split('/')[1]
                     if net_image not in networkImages:
                         networkImages.append(net_image) 
-                if 'Labtainer base image from ubuntu-systemd' in line:
+                if 'Labtainer base image from ubuntu-systemd' in line or '22 noble' in line:
                     retval = 'ubuntu16'
                     if 'ubuntu20' in line:
+                        logger.debug('is ubuntu20')
                         retval = 'ubuntu20'
+                    elif '22 noble' in line:
+                        logger.debug('is ubuntu22')
+                        retval = 'ubuntu22'
                     break
 
     return retval
@@ -492,6 +507,13 @@ def isFirefox(image_name):
 
     return retval
 
+def FindTap(start_config):
+    for container_name in start_config.containers:
+        #logger.debug('FindTapMonitor check %s' % container_name)
+        if start_config.containers[container_name].tap.lower() == 'yes':
+            return container_name
+    return None
+
 def FindTapMonitor(start_config):
     for container_name in start_config.containers:
         #logger.debug('FindTapMonitor check %s' % container_name)
@@ -509,7 +531,7 @@ def HandleVolumes(volume, container):
         try:
             hostv, containerv = m.split(':') 
         except:
-            self.lgr.error('Bad mount definition %s' % m)
+            logger.error('Bad mount definition %s' % m)
             exit(1)
         homedir = os.environ['HOME']
         host_path = os.path.join(homedir, '.local', 'share', 'labtainers', hostv)
@@ -522,7 +544,14 @@ def HandleVolumes(volume, container):
         volume = volume + ' -v %s:%s:rw' % (host_path, container_path)
     return volume
 
-def CreateSingleContainer(labtainer_config, start_config, container, mysubnet_name=None, mysubnet_ip=None, quiet=False):
+def checkSbin(lab_path, name):
+    sbin = os.path.join(lab_path, name, '_system','sbin')
+    if os.path.isdir(sbin) and not os.path.islink(sbin):
+        return False
+    else:
+        return True
+    
+def CreateSingleContainer(labtainer_config, start_config, container, lab_path, mysubnet_name=None, mysubnet_ip=None, quiet=False):
     ''' create a single container -- or all clones of that container per the start.config '''
     retval = True
     #image_exists, result, new_image_name = ImageExists(container.image_name, container.registry)
@@ -542,13 +571,18 @@ def CreateSingleContainer(labtainer_config, start_config, container, mysubnet_na
         if not image_info.local_build:
             new_image_name = '%s/%s' % (container_registry, container.image_name) 
         if not image_info.local:
-            dockerPull(container_registry, container.image_name)
+            pullDockerImage(container_registry, container.image_name)
         docker0_IPAddr = getDocker0IPAddr()
         logger.debug("getDockerIPAddr result (%s)" % docker0_IPAddr)
         volume=''
-        ubuntu_systemd = isUbuntuSystemd(new_image_name)
+        ubuntu_systemd = isUbuntuSystemd(new_image_name, labtainer_config)
+        logger.debug('wtf, over, ubuntu_systemd is %s' % ubuntu_systemd)
         if ubuntu_systemd is not None:
            osTypeMap[container.image_name] = ubuntu_systemd
+           if ubuntu_systemd == 'ubuntu20':
+               if not checkSbin(lab_path, container.name): 
+                   logger.error('/sbin found in ubuntu20 container %s.  Would be fatal, exiting.' % container.name)
+                   return False
         is_firefox = isFirefox(new_image_name)
         if is_firefox:
             shm = '--shm-size=2g'
@@ -562,20 +596,22 @@ def CreateSingleContainer(labtainer_config, start_config, container, mysubnet_na
                 #volume='--security-opt seccomp=confined --tmpfs /run --tmpfs /run/lock -v /sys/fs/cgroup:/sys/fs/cgroup:ro'
                 volume='--security-opt seccomp=unconfined --tmpfs /run --tmpfs /run/lock -v /sys/fs/cgroup:/sys/fs/cgroup:ro'
                 cmd = 'docker run --rm --privileged -v /:/host %s setup' % new_image_name
-                logger.debug('cmd is %s' % cmd)
+                logger.debug('ubuntu16 cmd is %s' % cmd)
                 ps = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
                 output = ps.communicate()
                 logger.debug('back from docker run, output %s' % (output[0].decode('utf-8')))
                 if len(output[1]) > 0:
                     logger.debug('back from docker run, error %s' % (output[1].decode('utf-8')))
                 volume = '' 
-            elif ubuntu_systemd == 'ubuntu20':
-                volume = volume + " -v /sys/fs/cgroup:/sys/fs/cgroup:ro "
+            elif ubuntu_systemd == 'ubuntu20' or ubuntu_systemd == 'ubuntu22':
+                #volume = volume + " -v /sys/fs/cgroup:/sys/fs/cgroup:rw --cgroupns=host --tmpfs=/run/lock --tmpfs=/run "
+                volume = volume + " -v /sys/fs/cgroup:/sys/fs/cgroup:rw --cgroupns=host --tmpfs=/run/lock --tmpfs=/run "
+                logger.debug('volume is %s' % volume)
         if container.x11.lower() == 'yes':
             #volume = '-e DISPLAY -v /tmp/.Xll-unix:/tmp/.X11-unix --net=host -v$HOME/.Xauthority:/home/developer/.Xauthority'
             #volume = volume+' --env="DISPLAY" --volume="/tmp/.X11-unix:/tmp/.X11-unix:rw"'
             volume = volume+' --env="DISPLAY" --volume="/tmp/.X11-unix:/var/tmp/.X11-unix:rw"'
-            logger.debug('container using X11')
+            #logger.debug('container using X11')
 
         volume = HandleVolumes(volume, container)
         if container.mystuff.lower() == 'yes':
@@ -594,6 +630,9 @@ def CreateSingleContainer(labtainer_config, start_config, container, mysubnet_na
         #    #volume = volume+' --device="/dev/sdb"'
 
         add_hosts = ''     
+        if "_" in container.name:
+            no_underscores = container.name.replace("_","")
+            add_hosts = '--add-host %s:127.0.0.1 ' % no_underscores
         for item in container.add_hosts:
             if ':' not in item:
                if item in start_config.lan_hosts:
@@ -646,7 +685,12 @@ def CreateSingleContainer(labtainer_config, start_config, container, mysubnet_na
             ''' why does putenv not set the value? '''
             os.environ['DISTRIBUTED_LABTAINER'] = start_config.multi_user
             multi_user = '--env=DISTRIBUTED_LABTAINER' 
-
+        num_cpu_str = ''
+        if container.num_cpus is not None:
+            num_cpu_str = '--cpus=%s' % container.num_cpus
+        cpu_set_str = ''
+        if container.cpu_set is not None:
+            cpu_set_str = '--cpuset-cpus=%s' % container.cpu_set
 
         clone_names = GetContainerCloneNames(container)
 
@@ -657,15 +701,15 @@ def CreateSingleContainer(labtainer_config, start_config, container, mysubnet_na
                 subnet_ip, mac = GetNetParam(start_config, mysubnet_name, mysubnet_ip, clone_fullname)
             #createsinglecommand = "docker create -t %s --ipc host --cap-add NET_ADMIN %s %s %s %s %s --name=%s --hostname %s %s %s %s %s" % (dns_param, 
             if len(container.docker_args) == 0:
-                createsinglecommand = "docker create %s -t %s --cap-add NET_ADMIN %s %s %s %s %s %s --name=%s --hostname %s %s %s %s" % \
+                createsinglecommand = "docker create %s -t %s --cap-add NET_ADMIN %s %s %s %s %s %s --name=%s --hostname %s %s %s %s %s %s" % \
                     (shm, dns_param, network_param, subnet_ip, mac, priv_param, add_host_param,  
                     publish_param, clone_fullname, clone_host, volume, 
-                    multi_user, new_image_name)
+                    multi_user, num_cpu_str, cpu_set_str, new_image_name)
             else:
-                createsinglecommand = "docker create %s %s --shm-size=2g -t %s --cap-add NET_ADMIN %s %s %s %s %s %s --name=%s --hostname %s %s %s %s" % \
+                createsinglecommand = "docker create %s %s --shm-size=2g -t %s --cap-add NET_ADMIN %s %s %s %s %s %s --name=%s --hostname %s %s %s %s %s %s" % \
                     (shm, container.docker_args, dns_param, network_param, subnet_ip, mac, priv_param, add_host_param,  
                     publish_param, clone_fullname, clone_host, volume, 
-                    multi_user, new_image_name)
+                    multi_user, num_cpu_str, cpu_set_str, new_image_name)
             logger.debug("Command to execute was (%s)" % createsinglecommand)
             ps = subprocess.Popen(shlex.split(createsinglecommand), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             output = ps.communicate()
@@ -703,15 +747,15 @@ def CreateSubnets(start_config):
     #for (subnet_name, subnet_network_mask) in networklist.iteritems():
     for subnet_name in subnets:
         subnet_network_mask = subnets[subnet_name].mask
-        logger.debug("subnet_name is %s" % subnet_name)
-        logger.debug("subnet_network_mask is %s" % subnet_network_mask)
+        #logger.debug("subnet_name is %s" % subnet_name)
+        #logger.debug("subnet_network_mask is %s" % subnet_network_mask)
         if subnets[subnet_name].tap:
             has_tap = True
 
         command = "docker network inspect %s" % subnet_name
-        logger.debug("Command to execute is (%s)" % command)
+        #logger.debug("Command to execute is (%s)" % command)
         inspect_result = subprocess.call(shlex.split(command), stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-        logger.debug("Result of subprocess.call CreateSubnets docker network inspect is %s" % inspect_result)
+        #logger.debug("Result of subprocess.call CreateSubnets docker network inspect is %s" % inspect_result)
         if inspect_result == FAILURE:
             # Fail means does not exist - then we can create
             macvlan = ''
@@ -735,11 +779,11 @@ def CreateSubnets(start_config):
                 command = "docker network create -d %s --gateway=%s --subnet %s %s %s %s" % (net_type, subnet_gateway, subnet_network_mask, macvlan, ip_range, subnet_name)
             else:
                 command = "docker network create -d %s --subnet %s %s %s %s" % (net_type, subnet_network_mask, macvlan, ip_range, subnet_name)
-            logger.debug("Command to execute is (%s)" % command)
+            #logger.debug("Command to execute is (%s)" % command)
             #create_result = subprocess.call(command, shell=True)
             ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             output = ps.communicate()
-            logger.debug("stdout of subprocess.call CreateSubnets docker network create is %s" % output[0].decode('utf-8'))
+            #logger.debug("stdout of subprocess.call CreateSubnets docker network create is %s" % output[0].decode('utf-8'))
             if len(output[1]) > 0:
                 logger.debug('stderr of %s is %s' % (command, output[1].decode('utf-8')))
                 found_match_network = False
@@ -782,7 +826,7 @@ def CreateSubnets(start_config):
                         logger.error("Please stop the lab %s and try again." % lablist)
                         sys.exit(1)
         else:
-            logger.warning("Already exists! Not creating %s subnet at %s!\n" % (subnet_name, subnet_network_mask))
+            logger.error("Already exists! Not creating %s subnet at %s!\n" % (subnet_name, subnet_network_mask))
     return has_tap
 def RemoveSubnets(subnets, ignore_stop_error):
     for subnet_name in subnets:
@@ -850,40 +894,59 @@ def GetLabSeed(lab_master_seed, student_email):
 
 #def ParamStartConfig(lab_seed):
     
-def ParamForStudent(lab_master_seed, mycontainer_name, mycontainer_image_name, container_user, container_password, labname, 
-                    student_email, lab_path, name, image_info, running_container=None):
+def ParamForStudent(lab_master_seed, mycontainer_name, container, labname, 
+                    student_email, lab_path, name, image_info, num_containers, running_container=None):
     # NOTE image_info may or may not be populated.
     if running_container == None:
         running_container = mycontainer_name
 
+    
     mymd5_hex_string = GetLabSeed(lab_master_seed, student_email)
     logger.debug(mymd5_hex_string)
 
-    if not ParameterizeMyContainer(mycontainer_name, mycontainer_image_name, container_user, container_password, mymd5_hex_string,
+    if container.wait_for is not None:
+        logger.debug('waiting for %s to finish parameterizing' % container.wait_for)
+        WaitStartSync(container.wait_for)
+
+    if not ParameterizeMyContainer(mycontainer_name, container.image_name, container.user, 
+                                   container.password, mymd5_hex_string,
                                    student_email, labname, lab_path, name, image_info, running_container):
         logger.error("Failed to parameterize lab container %s!\n" % mycontainer_name)
         sys.exit(1)
     logger.debug('back from ParameterizeMyContainer for %s' % mycontainer_name)
+    CreateStartSync(container.name) 
+    num_done = CountStartSync()
+    dockerPull.moveUp(1)
+    if num_done == num_containers:
+        progress = 'Started %d containers, %d completed initialization. Done.\n' % (num_containers, num_done)
+    else:
+        progress = 'Started %d containers, %d completed initialization, please wait...\n' % (num_containers, num_done)
+    dockerPull.clearLine()
+    sys.stdout.write(progress)
 
-def DockerCmd(cmd, noloop=False):
+def DockerCmd(cmd, noloop=False, good_error=None):
     ok = False
     count = 0
     if noloop:
         count = 1000
     while not ok:
-        logger.debug("Command to execute is (%s)" % cmd)
+        #logger.debug("Command to execute is (%s)" % cmd)
         ps = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         output = ps.communicate()
         if len(output[1].decode('utf-8')) > 0:
             count += 1
-            logger.debug("Failed cmd %s %s" % (cmd, output[1].decode('utf-8')))
+            err_string =  output[1].decode('utf-8')
+            if good_error is not None and good_error in err_string:
+                #logger.debug("Failed cmd %s BUT got good error %s" % (cmd, good_error))
+                return True 
+            logger.debug("Failed cmd %s %s" % (cmd, err_string))
             if count > 1:
                 return False
             time.sleep(1)
         else:
            ok = True
         if len(output[0].decode('utf-8')) > 0:
-            logger.debug("cmd %s stdout: %s" % (cmd, output[0].decode('utf-8')))
+            #logger.debug("cmd %s stdout: %s" % (cmd, output[0].decode('utf-8')))
             out = output[0].decode('utf-8')
             if 'unrecognized option' in out or 'Unexpected EOF' in out:
                 return False
@@ -904,12 +967,12 @@ def CopyInstrConfig(mycontainer_name, container_user, lab_path):
 def CopyLabBin(mycontainer_name, mycontainer_image_name, container_user, lab_path, name, image_info):
     here = os.path.dirname(os.path.abspath(__file__))
     parent = os.path.dirname(here)
-    lab_bin_path = os.path.join(parent, 'lab_bin')
+    #lab_bin_path = os.path.join(parent, 'lab_bin')
+    lab_bin_path = os.path.join(os.getenv('LABTAINER_DIR'), 'scripts', 'labtainer-student', 'lab_bin')
     cmd = 'docker cp %s/.  %s:/home/%s/.local/bin/' % (lab_bin_path, mycontainer_name, container_user)
     if not DockerCmd(cmd):
         logger.error('failed %s' % cmd)
         exit(1)
-
     ''' TBD DO NOT move lab/config here -- would not catch the tar_list.txt files (skip list) '''
     ''' TBD perhaps move lab/_bin to here?  would it save duplicate containers?'''
     #container_bin = os.path.join(lab_path, name,'_bin')
@@ -932,7 +995,7 @@ def CopyLabBin(mycontainer_name, mycontainer_image_name, container_user, lab_pat
     dest_tar = os.path.join(tmp_dir, 'labsys.tar')
     lab_sys_path = os.path.join(parent, 'lab_sys')
 
-    cmd = 'tar cf %s -C %s usr etc' % (dest_tar, lab_sys_path)
+    cmd = 'tar cf %s -C %s usr etc bin' % (dest_tar, lab_sys_path)
     ps = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:
@@ -963,12 +1026,17 @@ def CopyLabBin(mycontainer_name, mycontainer_image_name, container_user, lab_pat
         if not DockerCmd(cmd):
             logger.error('failed changing mynotify to python3: %s' % cmd)
             exit(1)
+    elif mycontainer_image_name in osTypeMap and osTypeMap[mycontainer_image_name] == 'ubuntu22':
+        cmd = 'docker exec %s script -q -c "sed -i \'s+/usr/bin/env python+/opt/labtainer/venv/bin/python3+\' /usr/sbin/mynotify.py"' % (mycontainer_name)
+        if not DockerCmd(cmd):
+            logger.error('failed changing mynotify to python3: %s' % cmd)
+            exit(1)
 
 # Copy Students' Artifacts from host to instructor's lab container
 def CopyStudentArtifacts(labtainer_config, mycontainer_name, labname, container_user, container_password):
     # Set the lab name 
     command = 'docker exec %s script -q -c "echo %s > /home/%s/.local/.labname" /dev/null' % (mycontainer_name, labname, container_user)
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     result = subprocess.call(command, shell=True)
     logger.debug("Result of subprocess.call CopyStudentArtifacts set labname is %s (1=>FAILURE)" % result)
     if result == FAILURE:
@@ -977,7 +1045,7 @@ def CopyStudentArtifacts(labtainer_config, mycontainer_name, labname, container_
 
     # Create is_grade_container
     command = 'docker exec %s script -q -c "echo TRUE > /home/%s/.local/.is_grade_container" /dev/null' % (mycontainer_name, container_user)
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     result = subprocess.call(command, shell=True)
     logger.debug("Result of subprocess.call CopyStudentArtifacts create is_grade_container is %s (1=>FAILURE)" % result)
     if result == FAILURE:
@@ -987,6 +1055,8 @@ def CopyStudentArtifacts(labtainer_config, mycontainer_name, labname, container_
     username = getpass.getuser()
     xfer_dir = os.path.join(labtainer_config.host_home_xfer, labname)
     zip_filelist = glob.glob('/home/%s/%s/*.zip' % (username, xfer_dir))
+    lab_filelist = glob.glob('/home/%s/%s/*.lab' % (username, xfer_dir))
+    zip_filelist.extend(lab_filelist)
     logger.debug("filenames is (%s)" % zip_filelist)
     # Copy zip files from 'Shared' folder to 'home/$CONTAINER_USER'
     for fname in zip_filelist:
@@ -994,7 +1064,7 @@ def CopyStudentArtifacts(labtainer_config, mycontainer_name, labname, container_
         base_fname = os.path.basename(fname)
         # Copy zip file 
         command = 'docker cp %s %s:/home/%s/' % (fname, mycontainer_name, container_user)
-        logger.debug("Command to execute is (%s)" % command)
+        #logger.debug("Command to execute is (%s)" % command)
         result = subprocess.call(shlex.split(command))
         logger.debug("Result of subprocess.call CopyStudentArtifacts copy zipfile (%s) is %s (1=>FAILURE)" % (fname, result))
         if result == FAILURE:
@@ -1092,20 +1162,20 @@ def imageInfo(image_name, registry, base_registry, labtainer_config, is_rebuild=
     created, user, version = inspectImage(image_name)
     if created is not None:
         retval = ImageInfo(image_name, created, user, True, True, version, use_tag) 
-        logger.debug('%s local built, ts %s %s' % (image_name, created, user)) 
+        #logger.debug('%s local built, ts %s %s' % (image_name, created, user)) 
     else:
         ''' next see if there is a local image from the desired registry '''
         with_registry = '%s/%s' % (registry, image_name)
         created, user, version = inspectImage(with_registry)
         if created is not None:
             retval = ImageInfo(with_registry, created, user, True, False, version, use_tag) 
-            logger.debug('%s local from reg, ts %s %s version: %s' % (with_registry, created, user, version)) 
+            #logger.debug('%s local from reg, ts %s %s version: %s' % (with_registry, created, user, version)) 
         elif not local_build:
             ''' See if the image exists in the desired registry '''
             reg_host = None
             if ':' in labtainer_config.test_registry:
                 reg_host = labtainer_config.test_registry.split(':')[0]
-            logger.debug('imageInfo reg_host: %s  registry: %s' % (reg_host, registry))
+            #logger.debug('imageInfo reg_host: %s  registry: %s' % (reg_host, registry))
             if reg_host is not None and registry.startswith(reg_host):
                 created, user, version, use_tag, base = InspectLocalReg.inspectLocal(image_name, logger, 
                                   registry, is_rebuild=is_rebuild, quiet=quiet, no_pull=no_pull)
@@ -1116,7 +1186,7 @@ def imageInfo(image_name, registry, base_registry, labtainer_config, is_rebuild=
                     if not InspectRemoteReg.reachDockerHub():
                         logger.error('Unable to reach DockerHub.  \nIs the network functional?\n')
             if created is not None:
-                logger.debug('%s only on registry %s, ts %s %s version %s use_tag %s' % (with_registry, registry, created, user, version, use_tag)) 
+                #logger.debug('%s only on registry %s, ts %s %s version %s use_tag %s' % (with_registry, registry, created, user, version, use_tag)) 
                 retval = ImageInfo(with_registry, created, user, False, False, version, use_tag)
     if retval is None:
         logger.debug('%s not found local_build was %r' % (image_name, local_build))
@@ -1133,17 +1203,37 @@ def GetBothConfigs(lab_path, logger, servers=None, clone_count=None):
                        labtainer_config, logger, servers=servers, clone_count=clone_count)
     return labtainer_config, start_config
 
-def dockerPull(registry, image_name):
-    cmd = 'docker pull %s/%s' % (registry, image_name)
-    logger.debug('%s' % cmd)
-    print('pulling %s from %s' % (image_name, registry))
-    ps = subprocess.Popen(shlex.split(cmd), stderr=subprocess.PIPE, stdout=subprocess.PIPE)
-    output = ps.communicate()
-    if len(output[1]) > 0:
-        return False
-    print('Done with pull')
-    return True
-
+def pullDockerImage(registry, image_name):
+    image = '%s/%s' % (registry, image_name)
+    retval =  dockerPull.pull(image, logger=logger)
+    if not retval:
+        dockerok = False
+        try:
+            code = urllib.request.urlopen("https://hub.docker.com").getcode()
+            if code == 200:
+                dockerok = True
+            else:
+                print('Problem contacting docker hub, code %d' % code)
+                logger.debug('Problem contacting docker hub, code %d' % code)
+        except:
+            pass
+        if not dockerok:
+            print('Could not reach hub.docker.com')
+            logger.debug('Could not reach hub.docker.com')
+            try:
+                code = urllib.request.urlopen("https://google.com").getcode()
+                if code != 200:
+                    print('Could not reach google either, is the network functioning?')
+                    logger.debug('Could not reach google either, is the network functioning?')
+            except:
+                print('Could not reach google either, is the network functioning?')
+                logger.debug('Could not reach google either, is the network functioning?')
+        else:
+            print('Docker hub can be reached, maybe a problem with their site. Try later.')
+            logger.debug('Docker hub can be reached, maybe a problem with their site, or rate limites:')
+            limit_cmd = os.path.join(os.getenv('LABTAINER_DIR'), 'scripts','labtainer-student', 'bin', 'ratelimit.sh')
+            os.system(limit_cmd)
+    return retval
 
 def defineAdditionalIP(container_name, post_start_if, post_start_nets):
     for subnet in post_start_nets:
@@ -1200,13 +1290,41 @@ def MakeNetMap(start_config, mycontainer_name, container_user):
         cmd = 'docker cp /tmp/net_map.txt  %s:/var/tmp/' % (mycontainer_name)
         DockerCmd(cmd)
        
-def WaitForTap():
+def WaitForTap(start_config):
+    retval = True
     tap_dir = GetWaitTapDir()
     tap_lock = os.path.join(tap_dir,'lock')
+    fail_at = 40
     while not os.path.isdir(tap_lock):
+        fail_at = fail_at - 1
+        if fail_at <= 0:
+            retval = False
+            logger.error('tap lock dir not created at %s, exiting' % tap_lock)
+            log_path = os.path.join(os.getenv('LABTAINER_DIR'), 'logs', 'start_labdump.log')
+            tap = FindTap(start_config)
+            if tap is None:
+                logger.error('No component with TAP attribute')
+                break 
+            cmd = 'docker cp %s:/var/log/start_labdump.log %s' % (tap, log_path)
+            if not DockerCmd(cmd):
+                logger.error('failed to copy start_labdump.log')
+            break
         logger.debug('tap dir does not yet exist')
         time.sleep(1)
-    
+    return retval
+   
+def doX11Link(cmd):
+    retval = True
+    count = 0
+    logger.debug('do x11 link')
+    while not DockerCmd(cmd, noloop=True, good_error='File exists') and count<5:
+        time.sleep(1)
+        count += 1
+    if count >= 5:
+        logger.error('failed %s' % cmd)
+        retval = False
+    return retval
+ 
 def DoStartOne(labname, name, container, start_config, labtainer_config, lab_path,  
                student_email, quiet_start, results, auto_grade, image_info):
         retval = True
@@ -1214,7 +1332,6 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
         mycontainer_image_name = container.image_name
         container_user         = container.user
         container_password         = container.password
-        container_hostname         = container.hostname
         ''' mananage interfaces with multiple IP addresses, docker does not support directly '''
         post_start_if = {}
         post_start_nets = {}
@@ -1222,6 +1339,13 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
         haveContainer = AllContainersCreated(container)
         logger.debug("DoStart for %s AllContainersCreated result (%s)" % (container.name, haveContainer))
 
+        display = os.getenv('DISPLAY')
+        if ':' in display:
+            display = display.split(':')[1]
+            display_num = int(float(display))
+        else:
+            logger.error('could not get display number from %s' % os.getenv('DISPLAY'))
+            return 
         # Set need_seeds=False first
         need_seeds=False
         # IsContainerCreated return False if container does not exists
@@ -1230,7 +1354,7 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
             # Use CreateSingleContainer()
             containerCreated = False
             if len(container.container_nets) == 0 or container.tap == 'yes':
-                containerCreated = CreateSingleContainer(labtainer_config, start_config, container, quiet=quiet_start)
+                containerCreated = CreateSingleContainer(labtainer_config, start_config, container, lab_path, quiet=quiet_start)
             else:
                 #mysubnet_name, mysubnet_ip = container.container_nets.popitem()
                 mysubnet_name = next(iter(container.container_nets))
@@ -1240,13 +1364,14 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
                 if ':' in mysubnet_name:
                     subnet_name = mysubnet_name.split(':')[0] 
                     post_start_if[subnet_name] = mysubnet_ip
-                containerCreated = CreateSingleContainer(labtainer_config, start_config, container, subnet_name, mysubnet_ip, quiet=quiet_start)
+                containerCreated = CreateSingleContainer(labtainer_config, start_config, container, lab_path,
+                   mysubnet_name=subnet_name, mysubnet_ip=mysubnet_ip, quiet=quiet_start)
                 
             logger.debug("CreateSingleContainer %s result (%s)" % (mycontainer_name, containerCreated))
             if not containerCreated:
                 logger.error("CreateSingleContainer fails to create container %s!\n" % mycontainer_name)
                 results.append(False)
-                return
+                return 
 
             # Give the container some time -- just in case
             #time.sleep(3)
@@ -1263,6 +1388,7 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
             results.append(False)
             return
        
+        num_containers = len(start_config.containers.items())
         clone_names = GetContainerCloneNames(container)
         for mycontainer_name in clone_names:
             wait_for_tap = False
@@ -1279,14 +1405,16 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
                         post_start_nets[subnet_name] = []
                     if subnet_name not in post_start_if:
                         post_start_if[subnet_name] = mysubnet_ip
-                        logger.debug('container: %s assigned post_start_if[%s] %s, connecting' % (mycontainer_name, subnet_name, mysubnet_ip))
+                        #logger.debug('container: %s assigned post_start_if[%s] %s, connecting' % (mycontainer_name, subnet_name, mysubnet_ip))
                         connectNetworkResult = ConnectNetworkToContainer(start_config, mycontainer_name, subnet_name, mysubnet_ip)
                     else:
                         post_start_nets[subnet_name].append(mysubnet_ip)
                 else:
                     connectNetworkResult = ConnectNetworkToContainer(start_config, mycontainer_name, mysubnet_name, mysubnet_ip)
             if wait_for_tap:
-                WaitForTap()
+                if not WaitForTap(start_config):
+                    results.append(False)
+                    return
             # Start the container
             if not StartMyContainer(mycontainer_name):
                 logger.error("Container %s failed to start!\n" % mycontainer_name)
@@ -1295,47 +1423,56 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
 
             defineAdditionalIP(mycontainer_name, post_start_if, post_start_nets)
 
-            clone_need_seeds = need_seeds
-            if not clone_need_seeds:
-                cmd = "docker exec %s bash -c 'ls -l /var/labtainer/did_param'" % (mycontainer_name)
-                if not DockerCmd(cmd):
-                   print('One or more containers exists but are not parameterized.')
-                   print('Please restart this lab with the "-r" option.')
-                   DoStop(start_config, labtainer_config, lab_path, False)
-                   logger.error('One or more containers exists but not parameterized.')
-                   sys.exit(1)
-    
-            # If the container is just created, then use the previous user's e-mail
-            # then parameterize the container
-            elif quiet_start and clone_need_seeds:
-                ParamForStudent(start_config.lab_master_seed, mycontainer_name, mycontainer_image_name, container_user, container_password, 
-                                labname, student_email, lab_path, name, image_info)
-            
-            elif clone_need_seeds:
-                ParamForStudent(start_config.lab_master_seed, mycontainer_name, mycontainer_image_name, container_user, 
-                                                 container_password, labname, student_email, lab_path, name, image_info)
             if container.x11.lower() == 'yes':
                 ''' Avoid problems caused by container wiping out all of /tmp on startup '''
-                cmd = "docker exec %s bash -c 'if [ -d /tmp/.X11-unix ]; then rm -Rf /tmp/.X11-unix; fi'" % (mycontainer_name)
+                cmd = "docker exec %s bash -c 'mkdir -p /var/tmp/.X11-unix /tmp/.X11-unix'" % (mycontainer_name)
                 if not DockerCmd(cmd):
                     logger.error('failed %s' % cmd)
-                    exit(1)
-                cmd = "docker exec %s bash -c 'ln -s /var/tmp/.X11-unix /tmp/.X11-unix'" % (mycontainer_name)
-                if not DockerCmd(cmd):
-                    logger.error('failed %s' % cmd)
-                    exit(1)
+                    results.append(False)
+                    return
+            
+                cmd = "docker exec %s bash -c 'ln -s /var/tmp/.X11-unix/X%d /tmp/.X11-unix/X%d'" % (mycontainer_name, 
+                  display_num, display_num)
+                if not doX11Link(cmd):
+                    results.append(False)
+                    return
+            if not container.no_param: 
+                clone_need_seeds = need_seeds
+                if not clone_need_seeds:
+                    cmd = "docker exec %s bash -c 'ls -l /var/labtainer/did_param'" % (mycontainer_name)
+                    if not DockerCmd(cmd):
+                       print('One or more containers exists but are not parameterized.')
+                       print('Please restart this lab with the "-r" option.')
+                       DoStop(start_config, labtainer_config, lab_path, False)
+                       logger.error('One or more containers exists but not parameterized.')
+                       results.append(False)
+                       return
+        
+                # If the container is just created, then use the previous user's e-mail
+                # then parameterize the container
+                elif quiet_start and clone_need_seeds:
+                    ParamForStudent(start_config.lab_master_seed, mycontainer_name, container,
+                                    labname, student_email, lab_path, name, image_info, num_containers)
+                
+                elif clone_need_seeds:
+                    ParamForStudent(start_config.lab_master_seed, mycontainer_name, container,
+                                                     labname, student_email, lab_path, name, image_info, num_containers)
 
             if container.no_gw:
                 cmd = "docker exec %s bash -c 'sudo /bin/ip route del 0/0'" % (mycontainer_name)
                 DockerCmd(cmd)
                 cmd = "docker exec %s bash -c 'sudo route del default'" % (mycontainer_name)
                 DockerCmd(cmd)
+            if container.no_resolve:
+                cmd = "docker exec %s bash -c 'sudo echo \"\" > /etc/resolv.conf'" % (mycontainer_name)
+                DockerCmd(cmd)
             if container.tap == 'yes':
                 MakeNetMap(start_config, mycontainer_name, container_user)
             if container.lab_gateway is not None:
                 cmd = "docker exec %s bash -c 'sudo /usr/bin/set_default_gw.sh %s'" % (mycontainer_name, 
                         container.lab_gateway)
-                DockerCmd(cmd)
+                DockerCmd(cmd, good_error='SIOCDELRT: No such process')
+                #DockerCmd(cmd)
                 '''
                 ignore error.  TBD filter errors due to my_host not being set
                 if not DockerCmd(cmd):
@@ -1343,14 +1480,24 @@ def DoStartOne(labname, name, container, start_config, labtainer_config, lab_pat
                     results.append(False)
                     return
                 '''
-                cmd = "docker exec %s bash -c 'sudo echo \"nameserver %s\" >/etc/resolv.conf'" % (mycontainer_name, 
-                        container.lab_gateway)
+                cmd = "docker exec %s bash -c 'sudo route del my_host'" % (mycontainer_name)
+                #DockerCmd(cmd)
+                DockerCmd(cmd, good_error='SIOCDELRT: No such process')
+            if container.name_server is not None:
+                cmd = "docker exec %s bash -c 'echo \"nameserver %s\" | sudo tee /etc/resolv.conf'" % (mycontainer_name, 
+                        container.name_server)
                 if not DockerCmd(cmd):
                     logger.error('Fatal error in docker command %s' % cmd) 
                     results.append(False)
                     return
-                cmd = "docker exec %s bash -c 'sudo route del my_host'" % (mycontainer_name)
-                DockerCmd(cmd)
+            ''' repeat x11 because /tmp may have been wiped '''
+            if container.x11.lower() == 'yes':
+                cmd = "docker exec %s bash -c 'ln -fs /var/tmp/.X11-unix/X%d /tmp/.X11-unix/X%d'" % (mycontainer_name, 
+                  display_num, display_num)
+                if not doX11Link(cmd):
+                    results.append(False)
+                    return
+
     
         results.append(retval)
 
@@ -1359,7 +1506,7 @@ def GetUserEmail(quiet_start):
     while user_email is None:
         done = True
         # Prompt user for e-mail address
-        eprompt = 'Please enter your e-mail address: '
+        eprompt = '\nPlease enter your e-mail address: '
         prev_email = getLastEmail()
         if prev_email is not None:
             eprompt = eprompt+" [%s]" % prev_email
@@ -1374,6 +1521,8 @@ def GetUserEmail(quiet_start):
                 user_input = raw_input(eprompt)
             if not all(c in string.printable for c in user_input):
                 print('Bad characters detected.  Please re-enter email')
+            elif '"' in user_input or "'" in user_input:
+                print('No quotes allowed. Please re-enter email')
             else:
                 user_email = user_input 
         if user_email is not None:
@@ -1483,27 +1632,27 @@ def ContainerTerminals(lab_path, start_config, container, terminal_count, termin
     num_terminal = int(container.terminals)
     clone_names = GetContainerCloneNames(container)
     for mycontainer_name in clone_names:
-        logger.debug("container: %s  Number of terminals: %d" % (mycontainer_name, num_terminal))
+        #logger.debug("container: %s  Number of terminals: %d" % (mycontainer_name, num_terminal))
         if mycontainer_name in container_map:
-            logger.debug('container %s mapped to %s' % (mycontainer_name, container_map[mycontainer_name]))
+            #logger.debug('container %s mapped to %s' % (mycontainer_name, container_map[mycontainer_name]))
             mycontainer_name = container_map[mycontainer_name]
         CopyFilesToHost(lab_path, container.name, mycontainer_name, container.user)
         ''' HACK remove after a while....  catch case where framework updated to remove XTERM Instructions, but still using image
             that includes instructions, which then consumes a window '''
-        if container.xterm is None:
-            cmd = "docker exec %s bash -c 'ls -l $HOME/instructions.txt'" % (mycontainer_name)
-            if DockerCmd(cmd, noloop=True):
-                logger.debug('Found instructions, force xterm')
-                container.xterm = 'instructions'
+        #if container.xterm is None:
+        #    cmd = "docker exec %s bash -c 'ls -l $HOME/instructions.txt'" % (mycontainer_name)
+        #    if DockerCmd(cmd, noloop=True):
+        #        logger.debug('Found instructions, force xterm')
+        #        container.xterm = 'instructions'
 
         if container.xterm is not None:
                 logger.debug('container.xterm is <%s>' % container.xterm)
                 parts = container.xterm.split()
                 title = parts[0]
                 command = None
-                if title.lower() == 'instructions' and len(parts) == 1:
-                    command = 'startup.sh'
-                elif len(parts) == 2:
+                #if title.lower() == 'instructions' and len(parts) == 1:
+                #    command = 'startup.sh'
+                if len(parts) == 2:
                     command = parts[1]
                 else:
                     logger.error("Bad XTERM entryin in start.config: %s" % container.xterm)
@@ -1547,7 +1696,7 @@ def ContainerTerminals(lab_path, start_config, container, terminal_count, termin
                     terminal_groups[container.terminal_group].append(group_command)
                 else:
                     terminal_count += 1
-                    spawn_command = 'gnome-terminal %s -- docker exec -it --env COLUMNS=%d --env LINES=%d %s %s &' % (terminal_location,
+                    spawn_command = 'gnome-terminal %s --profile=labtainers -- docker exec -it --env COLUMNS=%d --env LINES=%d %s %s >/dev/null 2>&1 &' % (terminal_location,
                        columns, lines, mycontainer_name, cmd)
                     logger.debug("gnome spawn: %s" % spawn_command)
                     #print spawn_command
@@ -1567,10 +1716,23 @@ def SkipContainer(run_container, name, start_config, servers):
                 return True
     return False
 
+def getInput(prompt):
+    retval = None
+    try:
+        if sys.version_info >=(3,0):
+            retval = input(prompt)
+        else:
+            retval = raw_input(prompt)
+    except ValueError:
+        print('Lab start failed, see $LABTAINER_DIR/logs/labtainer.log')
+        
+    return retval
+
 def readFirst(lab_path, labname, fname, quiet_start, bail_option=False):
     #
     #  If a fname exists in the lab's config directory, less it before the student continues.
     #
+    retval = True
     doc_dir = os.path.join(lab_path, 'docs')
     read_first = os.path.join(doc_dir, fname)
     pdf = '%s.pdf' % labname
@@ -1588,19 +1750,22 @@ def readFirst(lab_path, labname, fname, quiet_start, bail_option=False):
             less.wait()
             if not bail_option:
                 if sys.version_info >=(3,0):
-                    dumb = input("Press <enter> to start the lab\n")
+                    dumb = getInput("Press <enter> to start the lab\n")
                 else:
-                    dumb = raw_input("Press <enter> to start the lab\n")
+                    dumb = getInput("Press <enter> to start the lab\n")
+                if dumb is None:
+                    retval = False
             else:
                 if sys.version_info >=(3,0):
-                    dumb = input("Continue? (y/n)")
+                    dumb = getInput("Continue? (y/n)")
                 else:
-                    dumb = raw_input("Continue? (y/n)")
+                    dumb = getInput("Continue? (y/n)")
                 if dumb.lower() != 'y':
                     cmd = 'rm -fr .tmp/%s' % labname
                     os.system(cmd)
+                    retval = False
                     print('Exiting lab')
-                    exit(0)
+    return retval
 
 def DoTerminals(start_config, lab_path, run_container=None, servers=None, container_map={}):
     # spawn terminal for each container based on num_terminal
@@ -1622,7 +1787,7 @@ def DoTerminals(start_config, lab_path, run_container=None, servers=None, contai
             #tab_commands = tab_commands+' --tab %s --' % command
         terminal_location, columns, lines = terminalCounter(terminal_count)
         terminal_count += 1
-        spawn_command = 'gnome-terminal %s %s' % (terminal_location, tab_commands)
+        spawn_command = 'gnome-terminal %s --profile=labtainers %s >/dev/null 2>&1' % (terminal_location, tab_commands)
         FNULL = open(os.devnull, 'w')
         result = subprocess.Popen(shlex.split(spawn_command), close_fds=True, stdout=FNULL, stderr=subprocess.STDOUT)
         logger.debug("gnome spawn tg: %s" % spawn_command)
@@ -1632,6 +1797,36 @@ def GetWaitTapDir():
     user = os.getenv('USER')
     wait_tap_dir = os.path.join('/tmp', user, 'wait_tap_dir')
     return wait_tap_dir
+
+def GetStartSyncDir():
+    user = os.getenv('USER')
+    sync_dir = os.path.join('/tmp', user, 'labtainer_sync')
+    return sync_dir
+
+def CountStartSync():
+    sync_dir = GetStartSyncDir()
+    dlist = os.listdir(sync_dir)
+    return len(dlist)
+
+def ClearStartSync():
+    sync_dir = GetStartSyncDir()
+    shutil.rmtree(sync_dir, ignore_errors=True)
+    try:
+        os.makedirs(sync_dir)
+    except os.error:
+        logger.error("did not expect to find dir %s" % sync_dir)
+    
+def WaitStartSync(container):
+    wait_dir = os.path.join(GetStartSyncDir(), container)
+    while not os.path.isdir(wait_dir):
+        time.sleep(1)
+
+def CreateStartSync(container):
+    my_dir = os.path.join(GetStartSyncDir(), container)
+    try:
+        os.makedirs(my_dir)
+    except os.error:
+        logger.error("did not expect to find dir %s" % my_dir)
 
 def DoStart(start_config, labtainer_config, lab_path, 
             quiet_start, run_container, servers, clone_count, auto_grade=False, debug_grade=False, container_images=None):
@@ -1673,10 +1868,10 @@ def DoStart(start_config, labtainer_config, lab_path,
         except:
             pass
         try:
-            os.makedirs(tap_lock_dir)
+            os.makedirs(lock)
         except:
             pass
-        
+    ClearStartSync()    
     student_email = None
     threads = []
     results = []
@@ -1694,9 +1889,9 @@ def DoStart(start_config, labtainer_config, lab_path,
             container_warning_printed = True
         image_info = None
         if container_images is not None:
-            logger.debug('container images not none,get for %s' % name) 
+            #logger.debug('container images not none,get for %s' % name) 
             image_info = container_images[name]
-            logger.debug('container images got image_info %s' % image_info)
+            #logger.debug('container images got image_info %s' % image_info)
             if image_info is None:
                 print('is none, map is %s' % str(container_images))
         t = threading.Thread(target=DoStartOne, args=(labname, name, container, start_config, labtainer_config, lab_path, 
@@ -1705,9 +1900,15 @@ def DoStart(start_config, labtainer_config, lab_path,
         t.setName(name)
         t.start()
     logger.debug('started all')
+    progress = 'Started %d containers, %d completed initialization, please wait...\n' % (len(threads), 0)
+    sys.stdout.write(progress)
     for t in threads:
         t.join()
         logger.debug('joined %s' % t.getName())
+    dockerPull.moveUp(1)
+    progress = 'Started %d containers, %d completed initialization. Done.\n' % (len(threads), len(threads))
+    dockerPull.clearLine()
+    sys.stdout.write(progress)
 
     if False in results:
         DoStop(start_config, labtainer_config, lab_path, False, run_container, servers)
@@ -1715,7 +1916,10 @@ def DoStart(start_config, labtainer_config, lab_path,
         sys.exit(1)
 
 
-    readFirst(lab_path, labname, 'read_first.txt', quiet_start)
+    if not readFirst(lab_path, labname, 'read_first.txt', quiet_start):
+        logger.error('readFirst saw exit, stopping lab')
+        DoStop(start_config, labtainer_config, lab_path, False, run_container, servers)
+        sys.exit(1)
     
     DoTerminals(start_config, lab_path, run_container=run_container, servers=servers)
                 
@@ -1759,7 +1963,12 @@ def CreateHostHomeXfer(host_xfer_dir):
         #    logger.debug("host_home_xfer directory (%s) exists" % host_xfer_dir)
     else:
         # does not exists, create directory
-        os.makedirs(host_xfer_dir)
+        try:
+            os.makedirs(host_xfer_dir)
+        except FileNotFoundError as ex:
+            print('The directory %s does not exist.  Perhaps a shared volume is not mounted?' % os.path.dirname(host_xfer_dir))
+            exit(1)
+
 
 # CopyChownGradesFile
 def CopyChownGradesFile(start_config, labtainer_config, name, container_name, container_user, ignore_stop_error):
@@ -1771,7 +1980,7 @@ def CopyChownGradesFile(start_config, labtainer_config, name, container_name, co
     # Copy <labname>.grades.txt file
     grade_filename = '/home/%s/%s.grades.txt' % (container_user, labname)
     command = "docker cp %s:%s /home/%s/%s" % (container_name, grade_filename, username, host_home_xfer)
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     result = subprocess.call(shlex.split(command))
     logger.debug("Result of subprocess.Popen exec cp %s.grades.txt file is %s" % (labname, result))
     if result == FAILURE:
@@ -1794,7 +2003,7 @@ def CopyChownGradesFile(start_config, labtainer_config, name, container_name, co
     # Copy <labname>.grades.json file
     gradejson_filename = '/home/%s/%s.grades.json' % (container_user, labname)
     command = "docker cp %s:%s /home/%s/%s" % (container_name, gradejson_filename, username, host_home_xfer)
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     result = subprocess.call(shlex.split(command))
     logger.debug("Result of subprocess.Popen exec cp %s.grades.json file is %s" % (labname, result))
     if result == FAILURE:
@@ -1872,7 +2081,7 @@ def StartLab(lab_path, force_build=False, is_redo=False, quiet_start=False,
                 print('and then try starting the lab again.') 
                 exit(0)
             if not image_info.local:
-                dockerPull(container_registry, mycontainer_image_name)
+                pullDockerImage(container_registry, mycontainer_image_name)
         else:
             logger.error('Could not find image info for %s' % name)
             exit(1)
@@ -1947,6 +2156,7 @@ def GatherOtherArtifacts(lab_path, name, container_name, container_user, contain
     did_file = []
     CopyAbsToResult(container_name, '/root/.bash_history', container_user, ignore_stop_error) 
     did_file.append('/root/.bash_history')
+ 
     with open (results_config_path) as fh:
         for line in fh:
             ''' container:filename is between "=" and first " : " '''
@@ -1992,9 +2202,9 @@ def GatherOtherArtifacts(lab_path, name, container_name, container_user, contain
 def CopyAbsToResult(container_name, fname, container_user, ignore_stop_error):
     ''' copy from abs path to ~/.local/result '''
 
-    command='docker exec %s mkdir -p /home/%s/.local/result' % (container_name, container_user)
+    #command='docker exec %s mkdir -p /home/%s/.local/result' % (container_name, container_user)
     command='docker exec %s sudo  cp --parents %s /home/%s/.local/result' % (container_name, fname, container_user)
-    logger.debug(command)
+    #logger.debug(command)
     child = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     error = child.stderr.read().decode('utf-8').strip()
     if len(error) > 0:
@@ -2028,15 +2238,15 @@ def CreateCopyChownZip(start_config, labtainer_config, name, container_name, con
     host_home_xfer  = os.path.join(labtainer_config.host_home_xfer, start_config.labname)
 
     # Run 'Student.py' - This will create zip file of the result
-    logger.debug("About to call Student.py")
+    #logger.debug("About to call Student.py")
     ''' Copy the Student.py on each stop to handle cases where the parameter list changes.'''
-    cmd = 'docker cp lab_bin/Student.py  %s:/home/%s/.local/bin/' % (running_container, container_user)
-    if not DockerCmd(cmd):
-        logger.error('failed to copy Student.py')
+    #cmd = 'docker cp lab_bin/Student.py  %s:/home/%s/.local/bin/' % (running_container, container_user)
+    #if not DockerCmd(cmd):
+    #    logger.error('failed to copy Student.py')
     cmd_path = '/home/%s/.local/bin/Student.py' % (container_user)
     #command=['docker', 'exec', '-i',  container_name, 'echo "%s\n" |' % container_password, '/usr/bin/sudo', cmd_path, container_user, container_image]
     command=['docker', 'exec', '-i',  running_container, '/usr/bin/sudo', cmd_path, container_user, container_image, str(keep_running)]
-    logger.debug('cmd: %s' % str(command))
+    #logger.debug('cmd: %s' % str(command))
     child = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output = child.communicate()
     ''' TBD remaining problems with flushing stdout? '''
@@ -2046,9 +2256,9 @@ def CreateCopyChownZip(start_config, labtainer_config, name, container_name, con
         if ignore_stop_error:
             logger.debug("Container %s fail on executing Student.py %s \n" % (running_container, output[1].decode('utf-8')))
         else:
-            logger.error("Container %s fail on executing Student.py %s \n" % (running_container, output[1].decode('utf-8')))
+            logger.error("Container %s fail on executing %s %s \n" % (running_container, command, output[1].decode('utf-8')))
         return None, None
-    logger.debug("results from Student.py: %s" % output[0].decode('utf-8'))
+    #logger.debug("results from Student.py: %s" % output[0].decode('utf-8'))
     
     #out_string = output[0].strip()
     #if len(out_string) > 0:
@@ -2063,10 +2273,10 @@ def CreateCopyChownZip(start_config, labtainer_config, name, container_name, con
         logger.error("did not expect to find dir %s" % tmp_dir)
     source_dir = os.path.join('/home', container_user, '.local', 'zip')
     cont_source = '%s:%s' % (container_name, source_dir)
-    logger.debug('will copy from %s ' % source_dir)
+    #logger.debug('will copy from %s ' % source_dir)
     command = ['docker', 'cp', cont_source, tmp_dir]
     # The zip filename created by Student.py has the format of e-mail.labname.zip
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     child = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     error_string = child.stderr.read().decode('utf-8').strip()
     if len(error_string) > 0:
@@ -2103,7 +2313,7 @@ def CreateCopyChownZip(start_config, labtainer_config, name, container_name, con
 # Stop my_container_name container
 def StopMyContainer(container_name, ignore_stop_error):
     command = "docker stop -t 1 %s" % container_name
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:
@@ -2139,7 +2349,7 @@ def GetListRunningLabType():
     is_gns3 = False
     # Note: doing "docker ps" not "docker ps -a" to get just the running container
     command = "docker ps"
-    logger.debug("GetListRunningLab Command to execute is (%s)" % command)
+    #logger.debug("GetListRunningLab Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:
@@ -2168,6 +2378,9 @@ def GetListRunningLabType():
                 ''' gns3 labtainer image '''
                 labname = image_name.split('_', 1)[0]
                 is_gns3 = True
+            elif container_name.endswith('.student'):
+                ''' docker is sick, changed image name to checksum. '''
+                labname = container_name.split('.')[0]
             else:
                 logger.debug('not a labtainer: %s' % image_name)
                 continue
@@ -2185,7 +2398,7 @@ def GetListRunningLab():
 def GetListLabContainerOnNetwork(network_name):
     containerlabnamelist = []
     command = "docker network inspect %s" % network_name
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:
@@ -2213,7 +2426,7 @@ def FindNetworkGivenGatewayIP(gateway_address):
     networklist = []
     # First get a list of network name of driver=bridge
     command = "docker network ls --filter driver=bridge"
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:
@@ -2235,7 +2448,7 @@ def FindNetworkGivenGatewayIP(gateway_address):
     # Loop through each network (driver=bridge) to find if any uses IP address as gateway
     for network_name in networklist:
         command = "docker network inspect %s" % network_name
-        logger.debug("Command to execute is (%s)" % command)
+        #logger.debug("Command to execute is (%s)" % command)
         ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         output = ps.communicate()
         if len(output[1].strip()) > 0:
@@ -2264,7 +2477,7 @@ def FindNetworkGivenSubnet(subnet):
     networklist = []
     # First get a list of network name of driver=bridge
     command = "docker network ls --filter driver=bridge"
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:
@@ -2286,7 +2499,7 @@ def FindNetworkGivenSubnet(subnet):
     # Loop through each network (driver=bridge) to find if any that has the same subnet
     for network_name in networklist:
         command = "docker network inspect %s" % network_name
-        logger.debug("Command to execute is (%s)" % command)
+        #logger.debug("Command to execute is (%s)" % command)
         ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         output = ps.communicate()
         if len(output[1].decode('utf-8').strip()) > 0:
@@ -2370,25 +2583,26 @@ def DoStopOne(start_config, labtainer_config, lab_path, name, container, zip_fil
                             logger.error("container %s not running\n" % (mycontainer_name))
                             retval = False
                     continue
-                GatherOtherArtifacts(lab_path, name, mycontainer_name, container_user, container_password, ignore_stop_error)
-                # Before stopping a container, run 'Student.py'
-                # This will create zip file of the result
+                if not container.no_param:
+                    GatherOtherArtifacts(lab_path, name, mycontainer_name, container_user, container_password, ignore_stop_error)
+                    # Before stopping a container, run 'Student.py'
+                    # This will create zip file of the result
+        
+                    baseZipFilename, currentContainerZipFilename = CreateCopyChownZip(start_config, labtainer_config, name, 
+                                 mycontainer_name, mycontainer_image, container_user, container_password, ignore_stop_error, keep_running)
+                    if baseZipFilename is not None:
+                        if currentContainerZipFilename is not None:
+                            zip_file_list.append(currentContainerZipFilename)
+                        else:
+                            logger.debug('currentContainerZipFilename is None for container %s' % mycontainer_name)
     
-                baseZipFilename, currentContainerZipFilename = CreateCopyChownZip(start_config, labtainer_config, name, 
-                             mycontainer_name, mycontainer_image, container_user, container_password, ignore_stop_error, keep_running)
-                if baseZipFilename is not None:
-                    if currentContainerZipFilename is not None:
-                        zip_file_list.append(currentContainerZipFilename)
+                        logger.debug("baseZipFilename is (%s)" % baseZipFilename)
                     else:
-                        logger.debug('currentContainerZipFilename is None for container %s' % mycontainer_name)
-
-                    logger.debug("baseZipFilename is (%s)" % baseZipFilename)
-                else:
-                    logger.debug("baseZipFileName is None for container %s" % mycontainer_name)
-
-                #command = 'docker exec %s echo "%s\n" | sudo -S rmdir /tmp/.mylockdir 2>/dev/null' % (mycontainer_name, container_password)
-                command = 'docker exec %s sudo rmdir /tmp/.mylockdir 2>/dev/null' % (mycontainer_name)
-                os.system(command)
+                        logger.debug("baseZipFileName is None for container %s" % mycontainer_name)
+    
+                    #command = 'docker exec %s echo "%s\n" | sudo -S rmdir /tmp/.mylockdir 2>/dev/null' % (mycontainer_name, container_password)
+                    command = 'docker exec %s sudo rmdir /tmp/.mylockdir 2>/dev/null' % (mycontainer_name)
+                    os.system(command)
                 if not keep_running:
                     did_this = []
                     for mysubnet_name, mysubnet_ip in container.container_nets.items():
@@ -2414,6 +2628,8 @@ def SynchStop(start_config, run_container=None):
     for name, container in start_config.containers.items():
         if run_container is not None and container.full_name != run_container:
             #print('not for me %s ' % run_container)
+            continue
+        if container.no_param:
             continue
         clone_names = GetContainerCloneNames(container)
         for mycontainer_name in clone_names:
@@ -2476,9 +2692,15 @@ def GatherZips(zip_file_list, labtainer_config, start_config, labname, lab_path)
     logger.debug("zip_file_list is ")
     logger.debug(zip_file_list)
     logger.debug("baseZipFilename is (%s)" % baseZipFilename)
-    combinedZipFilename = "%s/%s.zip" % (xfer_dir, baseZipFilename)
+    oldfile = "%s/%s.zip" % (xfer_dir, baseZipFilename)
+    if os.path.isfile(oldfile):
+        os.remove(oldfile)
+    combinedZipFilename = "%s/%s.lab" % (xfer_dir, baseZipFilename)
     logger.debug("The combined zip filename is %s" % combinedZipFilename)
-    zipoutput = zipfile.ZipFile(combinedZipFilename, "w")
+    with open(combinedZipFilename, 'w') as fh:
+        fh.write('Foil click-happy students')
+    
+    zipoutput = zipfile.ZipFile(combinedZipFilename, "a")
     # Go to the xfer_dir
     os.chdir(xfer_dir)
     for fname in zip_file_list:
@@ -2551,7 +2773,7 @@ def DoStop(start_config, labtainer_config, lab_path, ignore_stop_error, run_cont
         return None
     ''' Check for empty email identifier '''
     if zip_file_list[0].startswith('.'):
-        lgr.error('Missing email for student, cannot gather artifacts')
+        logger.error('Missing email for student, cannot gather artifacts')
         return None
     GatherZips(zip_file_list, labtainer_config, start_config, labname, lab_path)
     return retval
@@ -2618,7 +2840,7 @@ def DoMoreterm(lab_path, container_name, clone_num=None, alt_name=None):
         logger.debug("No terminals supported for %s" % container_name)
         return False
     else:
-        spawn_command = "gnome-terminal -- docker exec -it %s bash -l -c bash&" % 	mycontainer_name
+        spawn_command = "gnome-terminal --profile=labtainers -- docker exec -it %s bash -l -c bash > /dev/null 2>&1 &" % 	mycontainer_name
         logger.debug("spawn_command is (%s)" % spawn_command)
         os.system(spawn_command)
     return True
@@ -2656,14 +2878,14 @@ def DoTransfer(lab_path, container_name, filename, direction):
         if os.path.exists(filename_path) and os.path.isfile(filename_path):
             # Copy file and chown it
             command = 'docker cp %s %s:/home/%s/' % (filename_path, mycontainer_name, container_user)
-            logger.debug("Command to execute is (%s)" % command)
+            #logger.debug("Command to execute is (%s)" % command)
             result = subprocess.call(command, shell=True)
             logger.debug("Result of subprocess.call DoTransfer copy (TOCONTAINER) file (%s) is %s" % (filename_path, result))
             if result == FAILURE:
                 logger.error("Failed to copy file to container %s!\n" % mycontainer_name)
                 sys.exit(1)
             command = 'docker exec %s sudo chown %s:%s /home/%s/%s' % (mycontainer_name, container_user, container_user, container_user, filename)
-            logger.debug("Command to execute is (%s)" % command)
+            #logger.debug("Command to execute is (%s)" % command)
             result = subprocess.call(command, shell=True)
             logger.debug("Result of subprocess.call DoTransfer chown file (%s) is %s" % (filename_path, result))
             if result == FAILURE:
@@ -2675,7 +2897,7 @@ def DoTransfer(lab_path, container_name, filename, direction):
     else:
         # Transfer from container to host
         command = 'docker cp %s:/home/%s/%s %s/' % (mycontainer_name, container_user, filename, host_xfer_dir)
-        logger.debug("Command to execute is (%s)" % command)
+        #logger.debug("Command to execute is (%s)" % command)
         result = subprocess.call(command, shell=True)
         logger.debug("Result of subprocess.call DoTransfer copy (TOHOST) file (%s) is %s" % (filename, result))
         if result == FAILURE:
@@ -2688,8 +2910,8 @@ def CopyFilesToHost(lab_path, container_name, full_container_name, container_use
     isValidLab(lab_path)
     config_path       = os.path.join(lab_path,"config") 
     copy_path = os.path.join(config_path,"files_to_host.config")
-    logger.debug('CopyFilesToHost %s %s %s' % (labname, container_name, full_container_name))
-    logger.debug('CopyFilesToHost copypath %s' % copy_path)
+    #logger.debug('CopyFilesToHost %s %s %s' % (labname, container_name, full_container_name))
+    #logger.debug('CopyFilesToHost copypath %s' % copy_path)
     if os.path.isfile(copy_path):
         with open(copy_path) as fh:
             for line in fh:
@@ -2704,7 +2926,7 @@ def CopyFilesToHost(lab_path, container_name, full_container_name, container_use
                         dest = os.path.join(os.getcwd(), labname, file_name)
                         command = 'docker cp %s:/home/%s/%s %s' % (full_container_name, container_user, 
                             file_name.strip(), dest)
-                        logger.debug("Command to execute is (%s)" % command)
+                        #logger.debug("Command to execute is (%s)" % command)
                         result = subprocess.call(command, shell=True)
                         logger.debug("Result of subprocess.call DoTransfer copy (TOHOST) file (%s) is %s" % (file_name, 
                             result))
@@ -2714,7 +2936,7 @@ def CopyFilesToHost(lab_path, container_name, full_container_name, container_use
 
 def GetContainerId(image):
     command = "docker ps"
-    logger.debug("Command to execute is (%s)" % command)
+    #logger.debug("Command to execute is (%s)" % command)
     ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     output = ps.communicate()
     if len(output[1].strip()) > 0:

@@ -121,6 +121,10 @@ public class GoalsData {
         
     //Update the results.config file with the user's input
     public String writeGoalsConfig(boolean usetmp){
+        if(listofGoals == null){
+            mainUI.output("ERROR listofGoals is null\n");
+            return null; 
+        }
          List<String> booleanResults = mainUI.getCurrentData().getResultsData().getBooleanResults();
          File goalsConfigFile = null;
          try {
@@ -1051,7 +1055,7 @@ public class GoalsData {
             //Operator
             ToolTipWrapper operator = (ToolTipWrapper)((GoalPanels) goal).getOperatorComboBox().getSelectedItem();
             String resultTag = "";
-            if(goalType.equals(GoalType_ITEMS[12])){ //matchExpression              
+            if(goalType.equals(GoalType_ITEMS[14])){ //matchExpression              
                 resultTag = ((GoalPanels) goal).getArithmeticResultTagTextField().getText();
             }
             else{

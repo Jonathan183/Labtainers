@@ -82,6 +82,8 @@ echo "$USER_EMAIL" > $USER_EMAILFILE
 echo "$LAB_NAME" > $LAB_NAMEFILE
 echo "" > $WATERMARK_NAMEFILE
 
+# more ownership fu from Docker foibles
+echo $CONTAINER_PASSWORD | sudo -S chown -R $CONTAINER_USER:$CONTAINER_USER $HOME/.local
 # fix ownship of system file from _system directory.  Docker!
 #previous_match_string=""
 while read f;do
@@ -106,6 +108,13 @@ if [[ -f /etc/sudoers.new ]]; then
 fi
 
 echo $CONTAINER_PASSWORD | sudo rm -f /run/nologin
+if [ -d /opt/labtainer/venv ]; then
+    # Ubuntu 22 or later locks down python, need to use virtual env
+    plist=$(ls $HOME/.local/bin/*.py)
+    for pfile in $plist; do
+    	sed -i 's+/usr/bin/env python+/opt/labtainer/venv/bin/python3+' $pfile
+    done
+fi
 
 # call ParameterParser.py (passing $LAB_INSTANCE_SEED)
 echo $CONTAINER_PASSWORD | sudo -S $HOME/.local/bin/ParameterParser.py $CONTAINER_USER $LAB_INSTANCE_SEED $CONTAINER_NAME $LAB_PARAMCONFIGFILE 
@@ -125,6 +134,11 @@ date
 # keep rsyslog from hanging 10 seconds on the xconsole
 if [ -f /etc/rsyslog.d/50-default.conf ]; then
    echo $CONTAINER_PASSWORD | sudo -S sed -i '/^daemon...mail/,+3 d' /etc/rsyslog.d/50-default.conf
+fi
+# keep rsyslog from eating garbage from apparmor
+if [ -f /etc/rsyslog.conf ]; then
+    echo $CONTAINER_PASSWORD |  sudo -S sed -i '/^. Don.t log private.*/a :msg, !contains, "apparmor"' /etc/rsyslog.conf
+    systemctl restart rsyslog
 fi
 
 if [ -f /var/tmp/home.tar ]; then
@@ -160,6 +174,14 @@ echo $CONTAINER_PASSWORD | sudo chmod a+rwx /sbin/consoletype
 echo "image version is $IMAGE_VERSION" >/tmp/mft.out
 # just for ubuntu, tbd limit to that?
 touch ~/.sudo_as_admin_successful
+
+userlist=$(ls /home)
+for user in $userlist; do
+    if [ $user != $CONTAINER_USER ]; then
+        ''' Append history to bash_history and set terminal title which gets trashed by the PROMPT_COMMAND '''
+        echo "export PROMPT_COMMAND='history -a;echo -ne \"\033]0;$user@${HOSTNAME}: ${PWD/$HOME/~}\007\"'" >> /home/$user/.bash_profile
+    fi
+done
 
 if [ -d $LOCKDIR ]; then
     rmdir $LOCKDIR

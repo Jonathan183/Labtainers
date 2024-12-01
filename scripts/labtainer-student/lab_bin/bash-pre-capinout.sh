@@ -74,10 +74,10 @@ treatlocal(){
    #echo "cmd_path is $cmd_path"
    local TAS=$PRECMD_HOME/.local/bin/treataslocal
    base_cmd=$(basename "$cmd_path")
-   if [[ $base_cmd == 'python' ]] || [[ $base_cmd == 'python3' ]]; then
+   if [[ $base_cmd == 'python' ]] || [[ $base_cmd == 'python3' ]] || [[ $base_cmd == 'sh' ]] || [[ $base_cmd == 'bash' ]]; then
        return 1
    fi
-   which=`which $cmd_path`
+   which=`which $cmd_path 2>&1`
    if [[ -z $which ]]; then
        # command does not exist
        return 0
@@ -233,7 +233,8 @@ preexec() {
            counter=$[$counter +1]
        fi
        cmd_line_array=($command)
-       if [ ${cmd_line_array[0]} == "sudo" ] || [ ${cmd_line_array[0]} == "time" ]; then
+       if [ ${cmd_line_array[0]} == "sudo" ] || [ ${cmd_line_array[0]} == "time" ] || \
+          [ ${cmd_line_array[0]} == "sh" ] || [ ${cmd_line_array[0]} == "bash" ]; then
           cmd_path=`which ${cmd_line_array[1]} 2>/dev/null`
        else
           cmd_path=`which ${cmd_line_array[0]} 2>/dev/null`
@@ -251,7 +252,9 @@ preexec() {
               precheckoutfile="$PRECMD_HOME/.local/result/precheck.stdout.$timestamp"
               precheckinfile="$PRECMD_HOME/.local/result/precheck.stdin.$timestamp"
               # superstition?
-              touch $precheckoutfile
+              if [ ! -z "$precheckoutfile" ]; then
+                  touch $precheckoutfile
+              fi
               $PRECMD_HOME/.local/bin/precheck.sh $cmd_path >> $precheckoutfile 2>/dev/null
               if [[ ! -s $precheckoutfile ]]; then
                   rm -f $precheckoutfile
@@ -272,7 +275,9 @@ preexec() {
                precheckoutfile="$PRECMD_HOME/.local/result/precheck.stdout.$timestamp"
                precheckinfile="$PRECMD_HOME/.local/result/precheck.stdin.$timestamp"
                # superstition regarding concurrance with mynotify service?
-               touch $precheckoutfile
+               if [ ! -z "$precheckoutfile" ]; then
+                  touch $precheckoutfile
+               fi
                $PRECMD_HOME/.local/bin/precheck.sh $cmd_path >> $precheckoutfile 2>/dev/null
                if [[ ! -s $precheckoutfile ]]; then
                    rm -f $precheckoutfile
@@ -303,7 +308,9 @@ preexec() {
            if [ -f $PRECMD_HOME/.local/bin/precheck.sh ]
            then
                # superstition?
-               touch $precheckoutfile
+               if [ ! -z "$precheckoutfile" ]; then
+                  touch $precheckoutfile
+               fi
                precheckoutfile="$PRECMD_HOME/.local/result/precheck.stdout.$timestamp"
                precheckinfile="$PRECMD_HOME/.local/result/precheck.stdin.$timestamp"
                $PRECMD_HOME/.local/bin/precheck.sh $cmd_path >> $precheckoutfile 2>/dev/null

@@ -281,7 +281,7 @@ In the GUI click the "Parameterize" button, then click "Create".  Give the param
 container from the pulldown list, and enter the absolute path of the program file as it exists on the container, e.g.,
 {\tt /home/ubuntu/myprog.sh}\footnote{Be sure to press Enter in the file name text field, otherwise the value you type will disappear.}.  Leave the operator as {\tt RAND\_REPLACE} and provide a range for the random values.
 In the symbol field, enter the {\tt REPLACEME} string that you put in your program. 
-Then build and run the lab and run the hello world program to observice the random value.  
+Then build and run the lab and run the hello world program to observe the random value.  
 
 
 \subsection{Command line lab creation}
@@ -552,8 +552,6 @@ script.  The script should be placed in container \_bin directory, i.e.,
 \begin{verbatim}
     $LABTAINER_DIR/labs/[labname]/[container]/_bin
 \end{verbatim}
-\noindent If the title is ``INSTRUCTIONS'', no script is necessary and the instructions.txt file
-in the container home directory will be displayed.
 \item USER [user name] -- The user name whose account will be accessed via the virtual terminals. 
 This defaults to ``ubuntu.''
 \item PASSWORD [password] -- The password for the user name whose account will be accessed via the virtual terminals. 
@@ -592,8 +590,8 @@ labs.
 \item LAB\_GATEWAY -- Optional IP address of the component's default network gateway.   If set, this will replace the
 default Docker gateway.  Students can toggle between gateways by using the togglegw.sh command, e.g., to enable communication
 with the host VM or the internet\footnote{This replaces use of the set\_default\_gw.sh script from 
-within fixlocal.sh scripts}.  This option will also replace the components resolv.conf with the given IP and will cause the
-static route to the {\tt my\_host} address to be deleted.
+within fixlocal.sh scripts}.  This option will also cause the static route to the {\tt my\_host} address to be deleted.
+\item NAME\_SERVER -- Optional IP address to provide with the {\tt nameserver} directive to replace the content of {\tt /etc/resolv.conf}
 \item NO\_GW [YES/NO] -- Disable the Docker default gateway, preventing network communication with the host or external devices.
 \item REGISTRY [registry] -- The id of the Docker Hub registry that is to contain the lab images. This overrides the value
 set in the GLOBAL section. 
@@ -625,6 +623,13 @@ located at:
 \end{verbatim}
 \noindent The purpose is allow that host directory to be reused across labs to avoid re-installing licensed software, i.e.,
 something where the student takes a distinct action to acknowledge a license.
+\item WAIT\_FOR -- Optional name of another container whose parameterization and fixlocal processing should complete
+prior to this container starting its parameterization.
+\item NUM\_CPUS -- Optional allocation of CPUs to this container.  Note the container sees all CPUs, e.g., every
+core allocated to the VM using {\tt lscpu}, but Docker will limit the container utilization of CPUs per this value,
+which may be a decimal value.
+\item CPU\_SET -- Optional allocation of specific CPU sets to this container. Format is either a comma separated list
+or a range, e.g, 1-3. 
 \end{itemize}
 \end{itemize}
   
@@ -746,8 +751,8 @@ See section \ref{suggestions} for guidance on including 3rd party applications w
 not simply added to your container via package managers.)
 
 
-\subsection {Lab Text and Instructions for Students} \label{instructions}
-Create a 'docs' directory in the [labname] directory if there isn't one there. This is where most textual information about the lab, as well as the lab manual, should be stored and modified. The 'about.txt' is an exception to this. \\ 
+\subsection {Lab Instructions for Students} \label{instructions}
+Create a 'docs' directory in the [labname] directory if there isn't one there. This is where most textual information about the lab, as well as the lab manual, should be stored and modified. \\ 
 
 \noindent Use LateX to write and create PDF files in the docs directory. Look at other lab's docs directory on how to create a Makefile for the LateX file. \\ 
 
@@ -766,15 +771,12 @@ to a [labname].pdf file within that same docs directory. And ``LAB\_DOCS'' is re
 \end{itemize}
 	
 
-\noindent An 'about.txt' file will be present in the 'config' directory of the lab. Any text inside will be displayed as a description to the lab when listed from running the 'labtainer' command in \$LABTAINER\_DIR/trunk/scripts/labtainer-student. This text will also appear when clicking on the logo in the GNS3 environment of Labtainers. \\ 
+\noindent An {\tt about.txt} file should be present in the 'config' directory of the lab. Any text inside will be displayed as a description to the lab when listed from running the {\tt labtainer} command. This text will also appear when clicking on the logo in the GNS3 environment of Labtainers. That directory should also include a {\tt keywords.txt} file that associates searchable keywords with the lab.  Use
+the {\tt labtainer -k} option to view a list of existing keywords.  Do no create new keywords unless clearly needed.\\ 
 
 \noindent If the start.config file includes ``COLLECT\_DOCS YES'', the content of the lab/docs directory will be
 included with the student artifacts and available extracted into the instructor's 
 labtainer\_xfer/[lab]/docs directory. \\
-
-\noindent A deprecated feature that still exists in a tiny handful of labs: "Lab instructions for students can be displayed in a virtual terminal by placing an
-``instructions.txt'' file within the home directory of one of the containers.  Refer to existing
-labs for conventions."  
 
 
 \subsection {Running programs in Virtual Terminals}
@@ -826,6 +828,9 @@ should be performed as within any Linux system, e.g., via services or rc.local.
 Note that use of {\tt sed -i ...} to modify configuration files (e.g., in etc), might result in overwriting symbolic links.
 Use {\tt sed -i --follow-symlinks ...} to avoid that pit.  Also note that CentOS rc.local files are in {\tt /etc/rc.d/rc.local}
 
+Synchronization between containers for purposes of sequencing the fixlocal processing can be achieved with the
+{\tt WAIT\_FOR} start.config parameter.
+
 \subsection{Persistent storage}
 \label{persistent}
 Sequences of labs may benefit from a student's ability to employ tools they have developed within more than one lab.
@@ -874,7 +879,7 @@ Each line of that file must start with a \verb!"<parameter_id> : "!, which is an
 is followed by one of the following operations:
 
 \begin{verbatim}
- RAND_REPLACE : <filename> : <symbol> : <LowerBound> : <UpperBound>
+ RAND_REPLACE : <filename> : <symbol> : <LowerBound> : <UpperBound> : <step>
    Replace a symbol within the named file with a random value within a given
    range.  The random value generator is initialized with the lab instance
    seed.
@@ -889,7 +894,9 @@ is followed by one of the following operations:
                          to randomize IP addresses.
            <symbol> - the string to be replaced
            <LowerBound> and <UpperBound> specifies the lower and upper bound
-                                       to be used by random generator
+                                       to be used by random generator, and
+           <step>       optionally ensures the value falls on a modulo boundary,
+                        e.g., to ensure offsets are word-aligned.
    example:
 
      some_parameter_id : RAND_REPLACE : client:/home/ubuntu/stack.c 
@@ -1050,6 +1057,9 @@ These packages of artifacts are then transferred to the instructor, (e.g., via e
 ingested into the instructor's system where lab assessment occurs. Timestamped stdin and stdout files
 are captured in \texttt{\$HOME/.local/result}
 
+Each container within a lab includes a default user, and it is only that user's stdin/stdout artificts that are
+captured.   
+
 By default, stdin and stdout for all non-system programs is captured, e.g., the results of an ``ls'' command
 are not captured.  The stdin and stdout of system programs\footnote{The ``source'' directive is not a system
 program, and should not be included in a treataslocal file.} will be captured if the program
@@ -1065,6 +1075,8 @@ a ``ignorelocal'' file in that same directory.  \footnote{These should not inclu
 
 The student commands are parsed to first account for the use of {\tt sudo}, {\tt time}, {\tt python} or {\tt python3}.
 The commands are also processed to account for the use of pipes and redirection. 
+
+The stdout files truncate after about 1MB to avoid swamping the grading system (and the instructor's computer) with large files.
 
 \subsubsection{Capturing program file output}
 \label{program output}
@@ -1098,7 +1110,9 @@ program    delim_type:delim_value
 \subsubsection{Bash History}
 The framework collects all student bash history into the \texttt{\$HOME/.bash\_history} and \newline
 \texttt{/root/.bash\_history} files.  These files are
-available for reference as an artifact file.  
+available for reference as an artifact file.  The bash history for the default user is collected from each
+container.  If a container has users other than the default user, files created or modified by those users
+beneath their home directories (e.g., their bash histories) are also collected.
 
 \subsubsection{System logs}
 All files referenced in the {\tt results.config} file, (described below in section \ref{results.config}
@@ -1234,8 +1248,9 @@ configuration file at:
 \begin{enumerate}
 \item The program that was invoked
 \item Whether the artifact is in stdin or stdout or is program output (prgout) as descrbed in section \ref{program output}
-\item An explicit file name, either as an absolute path or relative to the user HOME directory.  These are intended
-to be persistent log files, e.g., syslogs.
+\item An explicit file name, either as an absolute path or a path relative to the user HOME directory.  These are intended
+to be persistent files, e.g., syslogs.  \textbf{Note} files relative to the HOME directory must be expressed as relative paths and
+cannot be absolute paths.
 \end{enumerate}
 
 One or more properties of each artifact file are assigned symbolic names, referred to herein as \textit{results}, which 
@@ -1277,8 +1292,9 @@ or program output (prgout) artifacts will include timestamps.
 The optional {\tt container\_name} identifies the container hosting 
 the file.  Labs with a single container can omit this qualifier.  
 Alternately, an explicit {\tt file\_path} is intended for log files of services that persist 
-across multiple student operations.  If the given path is not 
-absolute, it is relative to the container user's home directory. 
+across multiple student operations.  If the file of interest is
+relative to the user's home directory, the path must be expressed as a relative
+path.  Otherwise, the path must be an absolute path.  
 The wildcard character '*' can be used in place of {\tt prog},
 i.e., *.stdin is for all stdin artifacts and *.stdout is for all 
 stdout artifacts. Note prestop files are excluded from wildcard
@@ -1336,6 +1352,8 @@ The {\tt line\_type} value is one of the following:
 no {\tt line\_type} or {\tt line\_id} fields.
 \begin{itemize}
 \item \textbf{LINE\_COUNT} -- The quantity of lines in the file. Remaining fields 
+                             are ignored.
+\item \textbf{SIZE} -- The size of the file. Remaining fields 
                              are ignored.
 \item \textbf{CHECKSUM}   -- The result value is set to the md5 checksum 
                              of the file.
@@ -2243,6 +2261,10 @@ For example, \textbf{never} change container names for existing labs.  If such
 a change is needed, create a new lab, and assign version numbers to
 it and the old lab.  
 
+Another cause for creating a new lab version is a change to automated assessment
+criteria.  If new criteria is not consistent with potentially old results, a new
+version should be considered.
+
 Lab version numbers are kept in the optional {\tt labs/[lab]/config/version} file.
 There is no need to have such a file until there are two or more versions of the
 same lab.  (Note if you want two versions of a given lab to be runnable and to appear
@@ -2757,7 +2779,11 @@ PASSWD : CLONE_REPLACE : .local/bin/fixlocal.sh : CLONE_NUM : CLONE
 \end{itemize}
 
 \section{Limitations} \label{limitations}
-The labtainers framework limits labs to the Linux execution environment.
+This sections describes some limitations of Labtainers that may affect a
+students perception of the computers and may limit some lab development.
+
+\begin{itemize}
+\item The labtainers framework limits labs to the Linux execution environment.
 However, a lab designer could prescribe the inclusion of a separate
 VM, e.g., a Windows system, and that VM could be networked with the Linux
 VM that hosts the Docker containers as described in \ref{external hosts}.  
@@ -2765,27 +2791,34 @@ Future work would be necessary to include
 artifacts from the Windows system within the framework's automated assessment
 and parameterization.
 
-The user does not see the /etc/fstab file.  Only virtual file systems can be
+\item The user does not see the /etc/fstab file.  Only virtual file systems can be
 mounted (or those mounted when the container is created.)
 
-Kernel logs do not appear in {\tt /var/log/kern.log}.  For logging events
+\item Kernel logs do not appear in {\tt /var/log/kern.log}.  For logging events
 such as iptables, consider using ulogd and a ``NFLOG'' directive in place of
 a ``LOG'' directive.  See the dmz-lab as an example.
 
-The available Docker network drivers do not permit IP address overlap between virtual networks.
+\item The available Docker network drivers do not permit IP address overlap between virtual networks.
 For example, you cannot define two 192.168.1.0/24 LANs.
 
-Student use of the shell directive "source" will cause stdin/stdout to not be captured.
+\item Student use of the shell directive "source" will cause stdin/stdout to not be captured.
 
-Inquisitive students will see evidence of artifact collection.  Home directories
+\item Inquisitive students will see evidence of artifact collection.  Home directories
 on containers includes a \texttt{.local} directory that includes Labtainer scripts that manage
 capturing and collection of artifacts, and that directory contains the stdin and
 stdout files generated by student actions. Additionally, when the student starts a process
 that will have stdin and stdout captured, the student will see extra processes within
 that process tree, e.g., the \texttt{tee} function that generates copies of those data streams.
-All of the containers share the Linux kernel with the Linux host.  Changes to
+
+\item All of the containers share the Linux kernel with the Linux host.  Changes to
 kernel configuration settings, e.g., enabling ASLR, will be visible across all
 of the containers.
+
+\item All processor and memory resources of the host (e.g., the Labtainers VM),  are visible to the student, e.g., via 
+{\tt /proc/cpuinfo}.  A lab designer can limit the processing available to a container using the
+{\tt NUM\_CPUS} container value.  And a specific set of CPUs can be allocated to a container using the
+{\tt CPU\_SET} value.  However, these values do not alter the content of {\tt /proc/cpuinfo}.
+\end{itemize}
 
 
 \section{Notes} \label{Notes}
@@ -2900,6 +2933,20 @@ delete the Docker-generated route:
 \noindent And the fixlocal.sh also replaces the resolv.conf entry with either a local DNS component, or a gateway running
 the dnsmasq utility.  The /etc/rc.local script generally sets the default gateway, and configures iptables.
 
+\subsubsection{Move to network2 base}
+Transitioning labs from using the network base to using the network2 base involves moving to Ubuntu20, which 
+does not have native ifconfig and requires  installation of net-tools, which is done in the Dockerfile.  However,
+linux tool maintainer decided to fix the output of ifconfig.  Therefore if you have {\tt ifconfig | grep} fu in your 
+iptables definitions or elsewhere, change {\tt inet addr:xxx} to {\tt inet.*xxx}.  And use awk substr to remove
+the new colon that follows network interface device names.  See the routing-basics lab as an example.  
+
+The move to network2 was motivated in part to get the latest QT GUI for wireshark to avoid black windows.
+Note however that many packages will not install on Ubuntu 20.  You must either install the snap package manager, 
+which drags a ton of extra stuff, or find an alternate package source (e.g., the .deb packages).
+
+\subsubsection{Ubuntu 22 base image}
+The base3 and network3 base images are built using Ubuntu 22.  Only minimal testing has been done and no labs as yet use these images.
+
 \subsection{User management and sudo}
 The Dockerfile should make the initial user, i.e., the user named in the start.config file, a member of sudoers.
 Otherwise, the fixlocal.sh script will not be unable to modify the environment.  If desired, that user can be
@@ -2969,6 +3016,11 @@ scripts so that they happen on each boot.
 Note also, that the Docker group (in which containers execute) is root 
 equivalent, and thus a hostile container can do damage to the Linux host.
 
+\subsubsection{Kernel logging}
+Since kernels are shared, system logs of a container may reflect kernel events occuring
+elsewhere, e.g., the host VM.  See the ossec lab web server component for an example
+of the rsyslog.conf file that filters out aparmor logs entries.
+
 \subsection {Test registry setup}
 The test registry is a Docker container that runs on the host, i.e., native OS
 upon which the VMs run.  The same test registry is shared by multiple development VMs.
@@ -2984,6 +3036,13 @@ CentOS base containers do not run 32-bit binaries.  Add the following to your do
 \begin{verbatim}
 RUN yum install -y compat-libstdc++-296.i686 compat-libstdc++-33.i686
 \end{verbatim}
+
+\subsection{Side effects of stdin/stdout mirroring}
+Labtainers uses a ptty within the mytty2.cpp program, which manages stdin and stdout for any monitored program the
+student starts.  In order to know when all children are done with the pty, we reap (reparent) all the chidren of the monitored
+program.  In a normal system, if the command program forks and then exits, its child would be reparented to the init process.
+In Labtainers, the reparenting is to a reaper process.  While commands or their children are running, 
+a process list will reveal extra processes named {\tt capinout} that the student would not see on a typical Linux system.
 
 \newpage
 \appendix
@@ -3040,7 +3099,7 @@ The SimLab directives are as follows:
 \begin{itemize}
 \item \textbf{window} $<$text$>$ -- Selects the window having a title that contains.  Note that
 tabs within windows are selected by first selecting the window, and then use {\tt key "ctrl+Next"}
-to tab over to the desired terminal tab.
+or {\tt ctrl+Prior} to tab over to the desired terminal tab.
 the given text.  Will timeout and fail after 20 seconds.
 \item \textbf{window\_wait} $<$text$>$ -- Like window, but no timeout.  Intended for
 use when the xterm title is changed by a program.
@@ -3069,9 +3128,10 @@ A {\tt wait\_proc} function is then automatically performed on the line.
 a keypress.  The lines should contain X11 keysims.  Blank lines cause a 2 second sleep.
 \item \textbf{replace\_file} $<$source file$>$ $<$container$>$:$<$dest file$>$ -- Copies content of a source
 file on the Linux host relative the simlab directory, to a destination path on the named selected container.  
-\item \textbf{add\_file} $<$source file$>$ $<$dest file$>$ -- Will append text from the source file to the 
+\item \textbf{add\_file} $<$source file$>$ $<$dest file$>$ [search] -- Will append text from the source file to the 
 end of the destination file.  The destination file will be accessed from the currently selected virtual
-terminal.  This uses a simple VI scheme to append text, and thus assumes the window and cwd are as needed.
+terminal.  This uses a simple VI scheme to append text, and thus assumes the window and cwd are as needed.  The optional
+search string will be issued to VI followed by an "O" for inserting above the target line.
 \item \textbf{include} $<$file$>$ Reads the named file and treats each line as a SimLab directive,
 and then continues processing the next directive in the source file.  This is similar to the C
 include directive.
@@ -3085,6 +3145,44 @@ Most GUI's have shortcut keys that can be used to automate their inclusion in a 
 
 Firefox is brittle when it restarts.  See the {\tt fixfirefox.txt} SimLab script for the snort lab
 for an example of avoiding errors when Firefox restarts.
+\subsection{Common x11 keys}
+Here's the common ones:
+
+\begin{verbatim}
+    Home → Home
+    End → End
+    PageUp → Prior
+    PageDown → Next
+    ↑ arrow → Up
+    ↓ arrow → Down
+    → arrow → Right
+    ← arrow → Left
+    Return → Return
+    Space → space
+    Tab → Tab
+    Backspace ⌫ → Backspace
+    Delete ⌦ → Delete
+    Escape → Escape
+    F1 → F1
+    F2 → F2
+    F3 → F3
+    ▤ Menu → Menu
+    PrintScreen → Print
+    ScrollLock → Scroll_Lock
+    Pause → Pause/Break
+
+    NumLock → Num_Lock
+    keypad + → KP_Add
+    keypad - → KP_Subtract
+    keypad * → KP_Multiply
+    keypad / → KP_Divide
+    keypad enter → KP_Enter
+    keypad . → KP_Decimal
+    keypad 0 → KP_0
+    keypad 1 → KP_1
+    keypad 2 → KP_2
+\end{verbatim}
+
 
 \subsection{Regression testing with smoketest.py} 
 \label{smoketest}

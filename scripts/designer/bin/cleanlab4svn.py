@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/labtainer/venv/bin/python3
 '''
 This software was created by United States Government employees at 
 The Center for the Information Systems Studies and Research (CISR) 
@@ -41,7 +41,7 @@ import tarfile
 # 1. Any tarball '*.tar.gz' in the lab directory, i.e., <lab>/*.tar.gz files
 # 2. Any tar list file, i.e., <lab>/config/*_tar.list files
 # 3. Any empty tar file, i.e., <lab>/<containers>/*tar/*.tar files
-# 4. Any pdf file in docs directory, i.e., <lab>/docs/*.pdf files
+# 4. Any intermediate pdf file in docs directory, i.e., <lab>/docs/*.aux files
 # Note:
 # 1. This script checks to make sure LABTAINER_DIR is defined
 #
@@ -98,15 +98,26 @@ def DoWork(current_dir, lab_name):
                 print("Fails to remove tar file (%s)" % name)
                 sys.exit(1)
 
-    # 4. Any pdf file in docs directory, i.e., <lab>/docs/*.pdf files that starts
+    # 4. Any intermediate pdf file in docs directory, e.g., <lab>/docs/*.aux files that starts
     #    with the labname
     #print "pdflist is (%s)" % pdflist
-    pdf_extensions = ['pdf','dvi','out','log','aux']
+    version_base = None
+    version_path = os.path.join(current_dir,'config', 'version')
+    if os.path.isfile(version_path):
+        with open(version_path) as fh:
+            for line in fh:
+                if line.strip().startswith('#') or len(line.strip())==0:
+                    continue
+                parts = line.split()
+                if len(parts) == 2:
+                    version_base = parts[0]
+        
+    pdf_extensions = ['dvi','out','log','aux']
     for ext in pdf_extensions:
         pdflist = glob.glob('%s/docs/*.%s' % (current_dir, ext))
         for name in pdflist:
-            #print "current name is %s" % name
-            if os.path.basename(name).startswith(lab_name):
+            #print("current name is %s lab_name %s" % (name, lab_name))
+            if os.path.basename(name).startswith(lab_name) or (version_base is not None and os.path.basename(name).startswith(version_base)):
                 try:
                     os.remove(name)
                 except:

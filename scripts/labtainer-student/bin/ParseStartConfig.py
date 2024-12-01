@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/labtainer/venv/bin/python3
 '''
 This software was created by United States Government employees at 
 The Center for Cybersecurity and Cyber Operations (C3O) 
@@ -76,7 +76,7 @@ class ParseStartConfig():
         self.get_configs(fname)
         self.multi_user = None
         ''' determine if running as a distributed Labtainers, or many clients on a single VM '''
-        if self.clone_count is not None and self.clone_count > 0: 
+        if self.clone_count is not None and int(self.clone_count > 0): 
             self.multi_user = 'clones'
         elif servers is not None:
             self.multi_user = servers 
@@ -111,6 +111,7 @@ class ParseStartConfig():
             self.disable = None
             self.no_pull = False
             self.no_gw = False
+            self.no_resolve = False
             self.thumb_volume = None
             self.thumb_command = None
             self.thumb_stop = None
@@ -123,6 +124,11 @@ class ParseStartConfig():
             self.did_nets = []
             self.mounts = []   # persist licensed sw installations across labs, e.g., IDA
             self.lab_gateway = None    # automatic call to set_default_gw.sh
+            self.name_server = None    # update resolv.conf
+            self.wait_for = None    # don't do parameterize/fixlocal until this continer is done.
+            self.num_cpus = None
+            self.cpu_set = None
+            self.no_param = False   # do not parameterize or collect results
 
         def add_net(self, name, ipaddr):
             self.container_nets[name] = ipaddr
@@ -165,7 +171,7 @@ class ParseStartConfig():
         def __init__(self, name, logger):
             self.name   = name
             self.mask = 0
-            self.gateway = 0
+            self.gateway = None
             self.macvlan = None
             self.macvlan_ext = None
             self.macvlan_use = None
@@ -182,7 +188,7 @@ class ParseStartConfig():
             except ValueError:
                 self.logger.error('bad ip subnet %s for subnet %s\n' % (self.mask, self.name))
                 exit(1)
-            if not IPAddress(self.gateway) in IPNetwork(self.mask):
+            if self.gateway is not None and (not IPAddress(self.gateway) in IPNetwork(self.mask)):
                 self.logger.error('network: %s Gateway IP (%s) not in subnet for SUBNET line(%s)!\n' % 
                     (self.name, self.gateway, self.mask))
                 exit(1)
@@ -248,7 +254,7 @@ class ParseStartConfig():
                    
                     '''
                     self.containers[val] = self.Container(val, self.logger)
-                    self.logger.debug('added container %s' % val)
+                    #self.logger.debug('added container %s' % val)
                     active = self.containers[val]
                 elif key == 'add-host':
                     active.add_hosts.append(val)
@@ -360,8 +366,8 @@ class ParseStartConfig():
                self.containers[name].script = "";
             if self.registry is None and self.containers[name].registry is None and \
                    use_test_registry is not None and (use_test_registry.lower() == 'yes' or use_test_registry.lower() == 'true'):
-                self.logger.debug('Changing registry from %s to test registry %s' % (self.containers[name].registry,
-                     self.labtainer_config.test_registry))
+                #self.logger.debug('Changing registry from %s to test registry %s' % (self.containers[name].registry,
+                #     self.labtainer_config.test_registry))
                 self.containers[name].registry = self.labtainer_config.test_registry
             else:
                 if self.containers[name].registry == None:
@@ -382,6 +388,10 @@ class ParseStartConfig():
                     self.containers[name].clone_copies = self.clone_count
             if self.containers[name].clone is not None:
                 self.container[name].clone_copies = self.contaienrs[name].clone
+            if self.containers[name].wait_for is not None:
+                if self.containers[name].wait_for not in self.containers:
+                    self.logger.error('Unknow wait_for container: %s for %s' % (self.containers[name].wait_for, name))
+                    exit(1)
 
     def show_current_settings(self):
         bar = "="*80

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/opt/labtainer/venv/bin/python3
 '''
 This software was created by United States Government employees at 
 The Center for Cybersecurity and Cyber Operations (C3O) 
@@ -41,13 +41,22 @@ import logging
 import LabtainerLogging
 import CurrentLab
 import argparse
-import imp
+import subprocess
+import shlex
+try:
+    import imp
+except:
+    from importlib.machinery import SourceFileLoader
+
+
+labtainer_dir = os.getenv('LABTAINER_DIR')
+scripts_dir = os.path.join(labtainer_dir, 'scripts')
+student_dir = os.path.join(scripts_dir, 'labtainer-student')
+lab_bin_dir = os.path.join(student_dir, 'lab_bin')
 here = os.path.dirname(os.path.abspath(__file__))
-lab_bin_dir = os.path.join(here, '../lab_bin')
+#lab_bin_dir = os.path.join(here, '../lab_bin')
 sys.path.append(here)
 sys.path.append(lab_bin_dir)
-student_dir = os.path.dirname(here)
-scripts_dir = os.path.dirname(os.path.dirname(here))
 assess_bin_path = os.path.join(scripts_dir, 'labtainer-instructor', 'assess_bin')
 instruct_bin_path = os.path.join(scripts_dir, 'labtainer-instructor', 'bin')
 sys.path.append(assess_bin_path)
@@ -55,8 +64,28 @@ sys.path.append(instruct_bin_path)
 grade_lab_path = os.path.join(scripts_dir, 'labtainer-instructor', 'bin', 'gradelab')
 orig_dir=os.getcwd()
 os.chdir(student_dir)
-gradelab = imp.load_source('gradelab', grade_lab_path)
+try:
+    gradelab = imp.load_source('gradelab', grade_lab_path)
+except:
+    gradelab = SourceFileLoader('gradelab', grade_lab_path).load_module()
 
+def checkRunning(logger):
+    command = "docker ps"
+    logger.debug("GetListRunningLab Command to execute is (%s)" % command)
+    ps = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    output = ps.communicate()
+    if len(output[1].decode('utf-8').strip()) > 0:
+        logger.error('Fail to get a list of running containers, error returned %s' % output[1].decode('utf-8'))
+        sys.exit(1)
+    if len(output[0].decode('utf-8')) > 0:
+        docker_ps_output = output[0].decode('utf-8').split('\n')
+        for line in docker_ps_output:
+            if len(line.strip()) > 0:
+                name = line.split()[-1]
+                if name.endswith('-igrader'):
+                    print('%s is currently running, it will be stopped before a new checkwork is started.' % (name))
+                    cmd = 'docker stop %s' % name
+                    labutils.DockerCmd(cmd)
 
 def main():
     parser = argparse.ArgumentParser(description='Check your work for a lab.  If no lab name is given, the currently running lab is checked')
@@ -66,6 +95,7 @@ def main():
     labname = None 
     lablist = []
     labutils.logger = LabtainerLogging.LabtainerLogging("/tmp/checkwork.log", 'checkwork', "../../config/labtainer.config")
+    checkRunning(labutils.logger)
     lablist = labutils.GetListRunningLab()
     if args.lab is not None:
         labname = args.lab
@@ -87,7 +117,9 @@ def main():
 
     labutils.logger.debug("Begin logging checkwork for %s lab" % labname)
     
-    lab_path = os.path.join(os.path.abspath('../../labs'), labname)
+    labtainer_dir = os.getenv('LABTAINER_DIR')
+    #lab_path = os.path.join(os.path.abspath('../../labs'), labname)
+    lab_path = os.path.join(labtainer_dir, 'labs', labname)
     labtainer_config, start_config = labutils.GetBothConfigs(lab_path, labutils.logger)
     if labtainer_config.checkwork != 'yes':
         print('Checking own work not supported for this deployment of Labtainers')
